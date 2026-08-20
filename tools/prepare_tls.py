@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the mojo-tls shim and copy its test assets into the umbrella build."""
+"""Build mojo-tls assets for the umbrella and fetched HTTP/2 package."""
 
 import platform
 import shutil
@@ -21,15 +21,23 @@ def main() -> int:
         ["bash", str(TLS_ROOT / "tools" / "gen_test_certs.sh")], check=True
     )
 
-    build = ROOT / "build"
-    certs = build / "certs"
-    certs.mkdir(parents=True, exist_ok=True)
-    shim = "libmojotls.dylib" if platform.system() == "Darwin" else "libmojotls.so"
-    shutil.copy2(TLS_ROOT / "build" / shim, build / shim)
-    for source in (TLS_ROOT / "build" / "certs").iterdir():
-        if source.is_file():
-            shutil.copy2(source, certs / source.name)
-    print(f"prepared TLS shim and certificates in {build}")
+    shim = (
+        "libmojotls.dylib"
+        if platform.system() == "Darwin"
+        else "libmojotls.so"
+    )
+    targets = [
+        ROOT / "build",
+        ROOT / "packages" / "mojo-http2" / "build",
+    ]
+    for build in targets:
+        certs = build / "certs"
+        certs.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(TLS_ROOT / "build" / shim, build / shim)
+        for source in (TLS_ROOT / "build" / "certs").iterdir():
+            if source.is_file():
+                shutil.copy2(source, certs / source.name)
+        print(f"prepared TLS shim and certificates in {build}")
     return 0
 
 
