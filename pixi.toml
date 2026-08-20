@@ -27,7 +27,6 @@ gen-conformance = "python3 -m grpc_tools.protoc -I$CONFORMANCE_SRC/conformance -
 mojo = ">=1.0.0,<2"
 python = ">=3.11"
 openssl = ">=3"
-c-compiler = "*"
 
 [pypi-dependencies]
 grpcio = ">=1.60"
