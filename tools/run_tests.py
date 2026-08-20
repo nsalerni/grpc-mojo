@@ -23,14 +23,23 @@ SUITES = {
         "packages/protomojo/src",
         "packages/protomojo/test",
     ],
+    # mojo-tls runs from its package root: the shim library and cert
+    # fixtures live under its build/ directory.
+    "packages/mojo-tls/test": [
+        "packages/mojo-tls/src",
+        "packages/mojo-net/src",  # declared dependency of tls
+        "packages/mojo-tls/test",
+    ],
     "packages/mojo-http2/test": [
         "packages/mojo-http2/src",
         "packages/mojo-net/src",  # declared dependency of h2
+        "packages/mojo-tls/src",  # declared dependency of h2 TLS
         "packages/mojo-http2/test",
     ],
     "test": [  # umbrella (grpc + integration)
         "packages/mojo-net/src",
         "packages/mojo-http2/src",
+        "packages/mojo-tls/src",
         "packages/protomojo/src",
         "src",
         "test",
@@ -38,12 +47,28 @@ SUITES = {
 }
 
 
-def includes_for(path: Path) -> list[str]:
+# suite root -> working directory for the run (default: repo root)
+SUITE_CWD = {
+    "packages/mojo-tls/test": "packages/mojo-tls",
+}
+
+# suite root -> idempotent setup commands run once before its tests
+SUITE_SETUP = {
+    "packages/mojo-tls/test": [
+        ["bash", "packages/mojo-tls/tools/build_shim.sh"],
+        ["bash", "packages/mojo-tls/tools/gen_test_certs.sh"],
+    ],
+}
+
+def suite_for(path: Path) -> str:
     rel = path.relative_to(ROOT).as_posix()
-    best = max((s for s in SUITES if rel.startswith(s + "/")), key=len)
+    return max((s for s in SUITES if rel.startswith(s + "/")), key=len)
+
+
+def includes_for(suite: str) -> list[str]:
     out: list[str] = []
-    for inc in SUITES[best]:
-        out += ["-I", inc]
+    for inc in SUITES[suite]:
+        out += ["-I", str(ROOT / inc)]
     return out
 
 
@@ -58,12 +83,18 @@ def main() -> int:
         print("no tests found")
         return 1
     failed = []
+    prepared: set[str] = set()
     for t in tests:
         rel = t.relative_to(ROOT)
+        suite = suite_for(t)
+        if suite not in prepared:
+            for cmd in SUITE_SETUP.get(suite, []):
+                subprocess.run(cmd, cwd=ROOT, check=True)
+            prepared.add(suite)
         try:
             proc = subprocess.run(
-                ["mojo", "run", *includes_for(t), str(t)],
-                cwd=ROOT,
+                ["mojo", "run", *includes_for(suite), str(t)],
+                cwd=ROOT / SUITE_CWD.get(suite, "."),
                 capture_output=True,
                 text=True,
                 timeout=600,

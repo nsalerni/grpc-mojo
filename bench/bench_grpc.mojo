@@ -21,7 +21,14 @@ from std.ffi import c_int, external_call
 from std.sys import argv
 
 from echo_messages import EchoRequest, EchoResponse
-from grpc import GrpcChannel, Metadata, Server, ServerCall, ServerContext
+from grpc import (
+    GrpcChannel,
+    GrpcTransport,
+    Metadata,
+    Server,
+    ServerCall,
+    ServerContext,
+)
 from h2 import Http2Connection
 from net import TCPListener
 from proto import decode, encode
@@ -38,9 +45,7 @@ def bench_time() -> Float64:
     return 0.005 if is_smoke() else 0.5
 
 
-def run_capped[
-    F: def () raises
-](f: F, secs: Float64) raises -> Float64:
+def run_capped[F: def() raises](f: F, secs: Float64) raises -> Float64:
     """Runs a benchmark bounded by `secs` and returns the mean in ns."""
     var report = run(f, min_runtime_secs=secs, max_runtime_secs=secs * 3)
     return report.mean(Unit.ns)
@@ -94,7 +99,8 @@ def main() raises:
         server.register_bidi[chat_handler]("/bench.Echo/Chat")
         try:
             var tcp = listener.accept()
-            var conn = Http2Connection(tcp^, is_client=False)
+            var transport = GrpcTransport.plaintext(tcp^)
+            var conn = Http2Connection(transport^, is_client=False)
             var handled = List[UInt32]()
             while True:
                 conn.process_next_frame()

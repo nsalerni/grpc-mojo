@@ -7,24 +7,27 @@ version = "0.1.0"
 license = "Apache-2.0"
 
 [tasks]
-test = "python3 tools/run_tests.py"
-bench = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src packages/mojo-http2/bench/bench_http2.mojo && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo"
-bench-smoke = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo --smoke && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src packages/mojo-http2/bench/bench_http2.mojo --smoke && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo --smoke && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo --smoke"
-example-server = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/protomojo/src -I src -I examples examples/echo_server.mojo"
-example-client = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/protomojo/src -I src -I examples examples/echo_client.mojo"
+prepare-tls = "python3 tools/prepare_tls.py"
+test = { cmd = "python3 tools/run_tests.py", depends-on = ["prepare-tls"] }
+bench = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo"
+bench-smoke = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo --smoke && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo --smoke && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo --smoke && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo --smoke"
+example-server = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I examples examples/echo_server.mojo"
+example-client = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I examples examples/echo_client.mojo"
 format = "mojo format src/ test/ examples/ packages/"
 gen-hpack = "python3 packages/mojo-http2/tools/gen_hpack_tables.py"
 gen-vectors = "python3 packages/protomojo/tools/gen_proto_vectors.py"
 gen-proto = "python3 -m grpc_tools.protoc -Ipackages/protomojo/test --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/test packages/protomojo/test/vectors.proto && python3 -m grpc_tools.protoc -Iexamples --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=examples examples/echo.proto && cp examples/echo_pb.mojo test/echo_pb.mojo"
-interop = "python3 test/interop/run_interop.py"
-compliance = "python3 test/compliance/run_compliance.py"
-interop-official = "python3 test/interop/official/run_official.py"
+interop = { cmd = "python3 test/interop/run_interop.py", depends-on = ["prepare-tls"] }
+compliance = { cmd = "python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
+interop-official = { cmd = "python3 test/interop/official/run_official.py", depends-on = ["prepare-tls"] }
 check-extraction = "python3 tools/check_extraction.py"
 gen-conformance = "python3 -m grpc_tools.protoc -I$CONFORMANCE_SRC/conformance -I$CONFORMANCE_SRC/src --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/conformance/gen $CONFORMANCE_SRC/conformance/conformance.proto $CONFORMANCE_SRC/src/google/protobuf/test_messages_proto3.proto"
 
 [dependencies]
 mojo = ">=1.0.0,<2"
 python = ">=3.11"
+openssl = ">=3"
+c-compiler = "*"
 
 [pypi-dependencies]
 grpcio = ">=1.60"

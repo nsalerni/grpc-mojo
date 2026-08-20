@@ -23,7 +23,7 @@ jobs:
           pixi-version: latest
           cache: true
 
-      - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2)
+      - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2, mojo-tls)
         run: python3 tools/fetch_deps.py
 
       - name: Install h2spec
@@ -39,7 +39,10 @@ jobs:
         run: |
           total=0
           for f in src/grpc/*.mojo; do
-            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null \
+              -I packages/mojo-net/src -I packages/mojo-http2/src \
+              -I packages/mojo-tls/src -I packages/protomojo/src -I src \
+              "$f" 2>&1 | grep -c warning || true)
             if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
           done
           test "$total" = "0"

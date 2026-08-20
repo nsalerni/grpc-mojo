@@ -18,8 +18,9 @@ meaning; messages are parsed from the stream's buffered bytes, and one
 message may span many frames (or share a frame with its neighbors).
 """
 
-from net import TCPStream
 from h2 import Http2Connection, get_u32_be
+
+from .transport import GrpcTransport
 
 comptime GRPC_MESSAGE_PREFIX_LEN = 5
 """Bytes in the message prefix: 1 compressed flag + 4 length."""
@@ -54,7 +55,7 @@ def frame_message(
 
 
 def send_message(
-    mut conn: Http2Connection[TCPStream],
+    mut conn: Http2Connection[GrpcTransport],
     stream_id: UInt32,
     payload: Span[Byte, _],
     *,
@@ -76,7 +77,7 @@ def send_message(
 
 
 def recv_message(
-    mut conn: Http2Connection[TCPStream],
+    mut conn: Http2Connection[GrpcTransport],
     stream_id: UInt32,
     *,
     max_size: Int = DEFAULT_MAX_RECV_MESSAGE_SIZE,

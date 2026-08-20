@@ -140,7 +140,7 @@ carrying its extracted test subset.
 | **mojo-h2** | `src/h2` | A3 guards, B3 clean | HTTP/2 for Mojo servers/clients generally |
 | **mojo-zlib** | new | thin FFI to system zlib | Unblocks gRPC gzip; general compression |
 | **mojo-threads** | new | RFC first (see D4) | pthread_create/mutex/condvar via `abi("C")` trampolines; unblocks concurrent serving |
-| **mojo-tls** | new | rustls-ffi binding, ALPN `h2` | TLS for the whole ecosystem; largest item |
+| **mojo-tls** | `packages/mojo-tls` | shipped with strict X.509, SNI, and ALPN in both roles | TLS for the whole ecosystem |
 
 mojo-threads is deliberately RFC-before-code: thread-safety guarantees
 interact with Mojo's ownership model (Send/Sync-like semantics), and a
@@ -185,9 +185,9 @@ Ordered by leverage-per-effort:
 | Phase | Items | Exit criteria | Status |
 |---|---|---|---|
 | **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · bug report / PRs / extraction pending |
-| **2 — Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming · ✅ deadlines/cancel · ✅ interop 24/24 · ✅ h2spec 145/0 · flood guards pending |
+| **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming · ✅ deadlines/cancel · ✅ interop 48/48 across h2c and TLS · ✅ h2spec 146/146 · flood guards pending |
 | **3 — Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish · D3 std.net RFC · C mojo-zlib + gRPC compression · A4 codegen imports/presence · B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts) · ✅ A4 (imports, optional, unknown fields) · ✅ conformance 698/698 · zlib + RFC pending |
-| **4 — Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | not started |
+| **4. Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | TLS interop ✅ · concurrency pending |
 
 **Definition of "100% compatible", concretely:** official gRPC interop
 suite green in both roles against grpcio, h2spec clean, protobuf

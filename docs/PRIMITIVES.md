@@ -51,14 +51,13 @@ ecosystem.
 
 ## 3. TLS — **standalone package**
 
-**Gap**: no TLS anywhere in the Mojo ecosystem. gRPC in production requires
-TLS 1.2+ with ALPN `h2`.
+**What we built**: `mojo-tls`, a small C shim over system libssl with TLS
+1.2/1.3, strict chain and hostname verification, SNI, and ALPN in both roles.
+`TLSStream` conforms to `IOStream`. `mojo-http2` and grpc-mojo use that seam
+for verified HTTP/2 and gRPC connections, and require the `h2` ALPN token.
 
-**Plan**: `mojo-tls` binding a C TLS library via FFI. BoringSSL or rustls-ffi
-are the candidates; rustls-ffi has the simpler, misuse-resistant C API and no
-global state. Needs: DLHandle-based loading or static linking story,
-certificate verification, ALPN. This is its own project; grpc-mojo keeps a
-`Transport` seam so TLS drops in under `h2` without changes above it.
+**Verification**: CPython `ssl`, h2spec TLS mode, and grpcio all exercise the
+implementation across client and server roles in CI.
 
 ## 4. Compression codecs (gzip/deflate) — **stdlib candidate**
 
@@ -118,4 +117,4 @@ stdlib forum alongside the async RFC.
 | 4 | zlib binding | community package → `std.compress` proposal | M | with grpc compression |
 | 2 | reactor | community package (`mojo-reactor`) | L | after Modular async stabilizes |
 | 7 | threads | forum RFC + `mojo-threads` package | M | next: unblocks concurrent server |
-| 3 | TLS | community package (`mojo-tls`) | L | independent track |
+| 3 | TLS | community package (`mojo-tls`) | complete | shipped |

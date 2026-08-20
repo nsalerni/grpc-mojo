@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Stage the standalone repository mirrors from this monorepo workspace.
 
-Produces four self-contained repo trees under --out (default build/split):
+Produces five self-contained package repo trees under --out (default
+build/split), plus the umbrella:
 
   mojo-net/    <- packages/mojo-net
   protomojo/   <- packages/protomojo
-  mojo-http2/  <- packages/mojo-http2 (+ deps.json/fetch_deps for mojo-net)
+  mojo-http2/  <- packages/mojo-http2 (+ source dependency tooling)
+  mojo-tls/    <- packages/mojo-tls
   grpc-mojo/   <- repo root minus packages/ (fetch_deps repopulates
                   packages/ from the standalone repos, so every include
                   path keeps working unchanged)
@@ -41,6 +43,7 @@ build/
 .DS_Store
 .vscode/
 .idea/
+
 """
 
 SHARED_FILES = ["CODE_OF_CONDUCT.md", "SECURITY.md"]
@@ -91,7 +94,16 @@ def stage_package(stage: Path, name: str):
         (dest / "tools").mkdir(exist_ok=True)
         shutil.copy2(ROOT / "tools" / "fetch_deps.py", dest / "tools" / "fetch_deps.py")
         (dest / "deps.json").write_text(
-            json.dumps({"dir": ".deps", "deps": {"mojo-net": {"ref": "main"}}}, indent=2)
+            json.dumps(
+                {
+                    "dir": ".deps",
+                    "deps": {
+                        "mojo-net": {"ref": "main"},
+                        "mojo-tls": {"ref": "main"},
+                    },
+                },
+                indent=2,
+            )
             + "\n"
         )
     print(f"staged {name} -> {dest}")
@@ -120,6 +132,7 @@ def stage_umbrella(stage: Path):
                     "mojo-net": {"ref": "main"},
                     "protomojo": {"ref": "main"},
                     "mojo-http2": {"ref": "main"},
+                    "mojo-tls": {"ref": "main"},
                 },
             },
             indent=2,
@@ -138,7 +151,7 @@ def main():
     if stage.exists():
         shutil.rmtree(stage)
     stage.mkdir(parents=True)
-    for name in ["mojo-net", "protomojo", "mojo-http2"]:
+    for name in ["mojo-net", "protomojo", "mojo-http2", "mojo-tls"]:
         stage_package(stage, name)
     stage_umbrella(stage)
     print("done")

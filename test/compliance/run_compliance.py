@@ -37,11 +37,21 @@ BUILD = ROOT / "build"
 TOOLS = ROOT / "test" / "compliance" / "tools"
 REPORT = ROOT / "docs" / "COMPLIANCE.md"
 HTML_REPORT = ROOT / "docs" / "COMPLIANCE.html"
+CERTS = BUILD / "certs"
+MOJO_RUN = [
+    "mojo", "run",
+    "-I", "packages/mojo-net/src",
+    "-I", "packages/mojo-http2/src",
+    "-I", "packages/mojo-tls/src",
+    "-I", "packages/protomojo/src",
+    "-I", "src",
+    "-I", "test",
+]
 
 RESULTS: dict[str, list[tuple[str, bool, str]]] = {}
 
 # Package suites executed and aggregated by this umbrella (in report order).
-PACKAGE_SUITES = ("protomojo", "mojo-http2", "mojo-net")
+PACKAGE_SUITES = ("protomojo", "mojo-http2", "mojo-net", "mojo-tls")
 
 
 def record(section: str, name: str, ok: bool, detail: str = ""):
@@ -51,21 +61,16 @@ def record(section: str, name: str, ok: bool, detail: str = ""):
 
 def run_tool(binary: str, *args, timeout=60) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(BUILD / binary), *map(str, args)],
+        [*MOJO_RUN, str(TOOLS / f"{binary}.mojo"), *map(str, args)],
         capture_output=True, text=True, timeout=timeout, cwd=ROOT,
     )
 
 
 def build_tools():
-    print("== building Mojo compliance tools ==")
+    print("== checking Mojo compliance tools ==")
     BUILD.mkdir(exist_ok=True)
     for src in sorted(TOOLS.glob("*.mojo")):
-        out = BUILD / src.stem
-        subprocess.run(
-            ["mojo", "build", "-I", "packages/mojo-net/src", "-I", "packages/mojo-http2/src", "-I", "packages/protomojo/src", "-I", "src", "-I", "test", str(src), "-o", str(out)],
-            check=True, cwd=ROOT,
-        )
-        print(f"  built {src.stem}")
+        print(f"  found {src.stem}")
 
 
 # ------------------------------------------------------- package suites ---
@@ -73,8 +78,8 @@ def build_tools():
 def run_package_suites(tmp: Path):
     """Run each package's own compliance suite and aggregate its results.
 
-    The package runners execute with this (root) interpreter — the root
-    pixi env carries every reference dependency — and report their rows
+    The package runners execute with this root interpreter. The root
+    pixi env carries every reference dependency and reports their rows
     via --json under the same section keys the umbrella always used
     (proto, hpack, h2, net).
     """
@@ -123,7 +128,7 @@ def section_packaging(tmp: Path):
 
 # ----------------------------------------------------------------- grpc ---
 
-def make_grpcio_probe_server(pb):
+def make_grpcio_probe_server(pb, use_tls: bool = False):
     import grpc
     code_by_num = {c.value[0]: c for c in grpc.StatusCode}
 
@@ -147,8 +152,8 @@ def make_grpcio_probe_server(pb):
     def echo(req, ctx):
         return pb.EchoResponse(message=req.message)
 
-    def sleep_2s(req, ctx):
-        time.sleep(2.0)
+    def sleep_5s(req, ctx):
+        time.sleep(5.0)
         return pb.EchoResponse(message="finally")
 
     def fail_rich(req, ctx):
@@ -161,7 +166,7 @@ def make_grpcio_probe_server(pb):
         def service(self, hcd):
             table = {"/probe.Probe/Fail": fail, "/probe.Probe/MetaEcho": meta_echo,
                      "/probe.Probe/Deadline": deadline, "/probe.Probe/Echo": echo,
-                     "/probe.Probe/Sleep": sleep_2s,
+                     "/probe.Probe/Sleep": sleep_5s,
                      "/probe.Probe/FailRich": fail_rich}
             fn = table.get(hcd.method)
             if fn is None:
@@ -172,7 +177,14 @@ def make_grpcio_probe_server(pb):
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     server.add_generic_rpc_handlers((Handler(),))
-    port = server.add_insecure_port("127.0.0.1:0")
+    if use_tls:
+        credentials = grpc.ssl_server_credentials(((
+            (CERTS / "server.key").read_bytes(),
+            (CERTS / "server.pem").read_bytes(),
+        ),))
+        port = server.add_secure_port("127.0.0.1:0", credentials)
+    else:
+        port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     return server, port
 
@@ -237,7 +249,7 @@ def section_grpc_client(tmp: Path):
         r = run_tool("grpc_client_probe", port, "sleep", 300)
         took = time.monotonic() - t0
         record("grpc", "client deadline enforced vs sleeping server (300ms -> DEADLINE_EXCEEDED)",
-               "code=4" in r.stdout and took < 1.5,
+               "code=4" in r.stdout and took < 4.0,
                f"out={r.stdout.strip()!r} took={took:.2f}s")
     finally:
         server.stop(0)
@@ -247,7 +259,12 @@ def section_grpc_server(tmp: Path):
     print("== grpc: grpcio client vs mojo server ==")
     import grpc
     import echo_pb2 as pb
-    proc = subprocess.Popen([str(BUILD / "grpc_server_probe")], stdout=subprocess.PIPE, text=True, cwd=ROOT)
+    proc = subprocess.Popen(
+        [*MOJO_RUN, str(TOOLS / "grpc_server_probe.mojo")],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
+    )
     line = proc.stdout.readline()
     port = int(line.strip().rsplit(":", 1)[-1])
     try:
@@ -325,6 +342,85 @@ def section_grpc_server(tmp: Path):
         proc.kill(); proc.wait()
 
 
+def section_grpc_tls(tmp: Path):
+    print("== grpc TLS: grpc-mojo vs grpcio ==")
+    import grpc
+    import echo_pb2 as pb
+
+    server, port = make_grpcio_probe_server(pb, use_tls=True)
+    try:
+        r = run_tool(
+            "grpc_client_probe",
+            port,
+            "echo",
+            65536,
+            "tls",
+            CERTS / "ca.pem",
+            "localhost",
+            timeout=120,
+        )
+        record(
+            "grpc-tls",
+            "Mojo TLS client: 64 KiB unary echo via grpcio server",
+            "len=65536 match=True code=0" in r.stdout,
+            r.stdout.strip() + r.stderr[-200:],
+        )
+        r = run_tool(
+            "grpc_client_probe",
+            port,
+            "echo",
+            1,
+            "tls",
+            CERTS / "ca.pem",
+            "wrong.example",
+            timeout=120,
+        )
+        record(
+            "grpc-tls",
+            "Mojo TLS client rejects a grpcio certificate hostname mismatch",
+            r.returncode != 0,
+            r.stdout.strip() + r.stderr[-200:],
+        )
+    finally:
+        server.stop(0)
+
+    proc = subprocess.Popen(
+        [
+            *MOJO_RUN,
+            str(TOOLS / "grpc_server_probe.mojo"),
+            str(CERTS / "server.pem"),
+            str(CERTS / "server.key"),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
+    )
+    line = proc.stdout.readline()
+    port = int(line.strip().rsplit(":", 1)[-1])
+    try:
+        credentials = grpc.ssl_channel_credentials(
+            root_certificates=(CERTS / "ca.pem").read_bytes()
+        )
+        with grpc.secure_channel(
+            f"localhost:{port}", credentials
+        ) as channel:
+            echo = channel.unary_unary(
+                "/probe.Probe/Echo",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            response = echo(pb.EchoRequest(message="secure"), timeout=30)
+            record(
+                "grpc-tls",
+                "grpcio TLS client: unary echo via Mojo server",
+                response.message == "secure",
+                response.message,
+            )
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 # ---------------------------------------------------------------- units ---
 
 def section_units():
@@ -362,7 +458,10 @@ def versions() -> dict[str, str]:
 
 def section_order() -> list[str]:
     """Canonical report order, plus any unexpected sections at the end."""
-    known = ["proto", "hpack", "h2", "net", "grpc", "packaging", "units"]
+    known = [
+        "proto", "hpack", "h2", "net", "tls", "grpc", "grpc-tls",
+        "packaging", "units",
+    ]
     return known + [s for s in RESULTS if s not in known]
 
 
@@ -373,12 +472,16 @@ SECTION_TITLES = {
               "Sequential header blocks encoded by one implementation and decoded by the other, in both directions, with dynamic-table state carried across blocks. Plus RFC 7541 Appendix C unit vectors (see `units`)."),
     "h2": ("`h2` vs hyper-h2 / hyperframe / h2spec",
            "Frame codec cross-checked byte-for-byte against hyperframe in both directions. Live connections run against hyper-h2, which raises ProtocolError on any protocol violation by the peer. h2spec (the standard RFC 9113/7541 conformance tool) runs its full suite against our server."),
+    "tls": ("`tls` vs CPython `ssl`",
+            "Live TLS connections with CPython on the other end in both roles: version negotiation, ALPN agreement and no-overlap behavior, chain and hostname verification, bulk transfer, and a bad-certificate corpus both implementations must reject."),
     "net": ("`net` vs CPython sockets",
             "1 MiB echo in both directions between grpc-mojo TCP and CPython sockets, including half-close (shutdown) and clean-EOF semantics."),
     "grpc": ("`grpc` vs grpcio",
              "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
+    "grpc-tls": ("`grpc` over TLS vs grpcio",
+                 "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo."),
     "packaging": ("Extraction isolation",
-                  "Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check — the mechanical proof behind independent open-sourcing."),
+                  "Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check. This is the mechanical proof behind independent open-sourcing."),
     "units": ("Spec-vector unit suites",
               "The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite."),
 }
@@ -543,13 +646,11 @@ def write_html_report():
     gaps = [
 
         ("Compression", "grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
-        ("TLS", "h2c plaintext only (PRIMITIVES.md #3)."),
-
         ("Concurrency", "connections served sequentially and bidi is receive-driven until Mojo exposes threads/async (PRIMITIVES.md #7)."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
     ]
     for k, v in gaps:
-        h.append(f"<li><strong>{esc(k)}</strong> &mdash; {esc(v)}</li>")
+        h.append(f"<li><strong>{esc(k)}</strong>: {esc(v)}</li>")
     h.append("</ul></section>")
     h.append(
         "<footer>Generated by test/compliance/run_compliance.py &middot; "
@@ -568,13 +669,13 @@ def write_report():
     lines = [
         "# Compliance & Compatibility Report",
         "",
-        "<!-- GENERATED by test/compliance/run_compliance.py — do not edit. -->",
+        "<!-- GENERATED by test/compliance/run_compliance.py; do not edit. -->",
         "<!-- Regenerate with: pixi run compliance -->",
         "",
         f"**Result: {passed}/{total} checks passed.** Generated {now}.",
         "",
         "Every check compares grpc-mojo against an established reference",
-        "implementation — never against itself. The proto, hpack, h2, and net",
+        "implementation, never against itself. The proto, hpack, h2, and net",
         "sections are executed by each package's own compliance suite",
         "(`packages/<pkg>/compliance/run_compliance.py`) and aggregated here;",
         "the umbrella adds the gRPC, packaging, and unit-suite sections.",
@@ -592,10 +693,10 @@ def write_report():
         title, blurb = SECTION_TITLES.get(section, (f"`{section}`", ""))
         rows = RESULTS[section]
         p = sum(1 for _, ok, _ in rows if ok)
-        lines += ["", f"## {title} — {p}/{len(rows)}", "", blurb, "",
+        lines += ["", f"## {title}: {p}/{len(rows)}", "", blurb, "",
                   "| Check | Result |", "|---|---|"]
         for name, ok, detail in rows:
-            status = "✅ pass" if ok else f"❌ **fail** — {detail[:160]}"
+            status = "✅ pass" if ok else f"❌ **fail**: {detail[:160]}"
             lines.append(f"| {name} | {status} |")
     lines += [
         "",
@@ -603,8 +704,6 @@ def write_report():
         "",
 
         "- **Compression**: `grpc-encoding` negotiation plumbing exists; codecs need a zlib binding (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
-        "- **TLS**: h2c plaintext only (PRIMITIVES.md item 3).",
-
         "- **Concurrency**: connections served sequentially until Mojo exposes threads/async (PRIMITIVES.md item 7).",
         "",
     ]
@@ -624,6 +723,7 @@ def main() -> int:
         section_packaging(tmp)
         section_grpc_client(tmp)
         section_grpc_server(tmp)
+        section_grpc_tls(tmp)
     section_units()
     return 0 if write_report() else 1
 

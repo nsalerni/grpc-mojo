@@ -15,6 +15,7 @@ from messages_pb import (
     StreamingOutputCallResponse,
 )
 from std.time import sleep
+from std.sys import argv
 
 from grpc import Server, ServerCall, ServerContext
 
@@ -112,7 +113,12 @@ def full_duplex(mut ctx: ServerContext, mut call: ServerCall) raises:
 
 
 def main() raises:
-    var server = Server("127.0.0.1", 0)
+    var args = argv()
+    var server: Server
+    if len(args) >= 3:
+        server = Server.tls("127.0.0.1", 0, args[1], args[2])
+    else:
+        server = Server("127.0.0.1", 0)
     server.register_unary[empty_call]("/grpc.testing.TestService/EmptyCall")
     server.register_unary[unary_call]("/grpc.testing.TestService/UnaryCall")
     server.register_client_streaming[streaming_input](
