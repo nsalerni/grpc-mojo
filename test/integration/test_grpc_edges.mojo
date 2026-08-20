@@ -247,7 +247,7 @@ struct RawRig(Movable):
     """A GrpcChannel client against a hand-driven server-side connection."""
 
     var channel: GrpcChannel
-    var server_conn: Http2Connection
+    var server_conn: Http2Connection[TCPStream]
 
     def pump_until_headers(mut self, sid: UInt32) raises:
         while True:
@@ -494,7 +494,7 @@ def streaming_abort_handler(
 struct E2ERig(Movable):
     var channel: GrpcChannel
     var server: Server
-    var server_conn: Http2Connection
+    var server_conn: Http2Connection[TCPStream]
     var handled: List[UInt32]
 
     def pump_until_reply(mut self) raises:

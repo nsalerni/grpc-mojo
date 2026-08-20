@@ -6,7 +6,7 @@ from std.time import sleep
 
 from h2 import Http2Connection
 from grpc import GrpcChannel, Metadata, Server, ServerContext, StatusCode
-from net import TCPListener
+from net import TCPStream, TCPListener
 from proto import decode, encode
 from echo_messages import EchoRequest, EchoResponse
 
@@ -45,7 +45,7 @@ def slow_handler(
 struct TestRig(Movable):
     var channel: GrpcChannel
     var server: Server
-    var server_conn: Http2Connection
+    var server_conn: Http2Connection[TCPStream]
     var handled: List[UInt32]
 
     def pump_server_until_reply(mut self) raises:

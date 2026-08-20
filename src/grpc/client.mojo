@@ -68,7 +68,7 @@ struct GrpcChannel(Movable):
     `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
     """
 
-    var conn: Http2Connection
+    var conn: Http2Connection[TCPStream]
     """The underlying HTTP/2 connection."""
     var authority: String
     """Value for the `:authority` pseudo-header (host:port)."""
@@ -105,13 +105,13 @@ struct GrpcChannel(Movable):
         var remaining = self.deadline_ns - Int64(monotonic())
         if remaining <= 0:
             return False
-        self.conn.tcp.set_read_timeout(remaining)
+        self.conn.stream.set_read_timeout(remaining)
         return True
 
     def _clear_deadline(mut self) raises:
         if self.deadline_ns != 0:
             self.deadline_ns = 0
-            self.conn.tcp.set_read_timeout(0)
+            self.conn.stream.set_read_timeout(0)
 
     def cancel(mut self, sid: UInt32) raises:
         """Cancels an in-flight call with RST_STREAM(CANCEL).

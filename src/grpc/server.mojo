@@ -129,7 +129,7 @@ struct ServerCall(Movable):
     Do not store a `ServerCall` beyond the handler invocation.
     """
 
-    var _conn: Pointer[Http2Connection, MutUntrackedOrigin]
+    var _conn: Pointer[Http2Connection[TCPStream], MutUntrackedOrigin]
     """Untracked pointer to the connection; valid only during dispatch."""
     var sid: UInt32
     """The HTTP/2 stream id of this call."""
@@ -586,7 +586,9 @@ struct Server(Movable):
 
     # --- dispatch ---
 
-    def _handle_stream(mut self, mut conn: Http2Connection, sid: UInt32) raises:
+    def _handle_stream(
+        mut self, mut conn: Http2Connection[TCPStream], sid: UInt32
+    ) raises:
         var headers = conn.streams[sid].headers.copy()
         var call = ServerCall(
             _conn=Pointer(to=conn).unsafe_origin_cast[MutUntrackedOrigin](),
@@ -650,7 +652,9 @@ struct Server(Movable):
                 )
 
     def dispatch_ready(
-        mut self, mut conn: Http2Connection, mut handled: List[UInt32]
+        mut self,
+        mut conn: Http2Connection[TCPStream],
+        mut handled: List[UInt32],
     ) raises -> Int:
         """Dispatches every stream whose request HEADERS have arrived.
 
@@ -685,7 +689,9 @@ struct Server(Movable):
                 count += 1
         return count
 
-    def _serve_connection_impl(mut self, mut conn: Http2Connection) raises:
+    def _serve_connection_impl(
+        mut self, mut conn: Http2Connection[TCPStream]
+    ) raises:
         var handled = List[UInt32]()
         while True:
             conn.process_next_frame()
