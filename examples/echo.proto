@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package echo;
+
+service Echo {
+  rpc Say(EchoRequest) returns (EchoResponse);
+  // Server-streaming: emits one response per whitespace-separated word.
+  rpc Split(EchoRequest) returns (stream EchoResponse);
+  // Client-streaming: concatenates all request messages.
+  rpc Join(stream EchoRequest) returns (EchoResponse);
+  // Bidi: echoes each message as it arrives (ping-pong friendly).
+  rpc Chat(stream EchoRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}

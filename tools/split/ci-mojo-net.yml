@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.11
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Docstring coverage (mojo doc gate)
+        run: |
+          total=0
+          for f in src/net/*.mojo; do
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+            if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
+          done
+          test "$total" = "0"
+
+      - name: Unit tests
+        run: pixi run test
+
+      - name: Benchmarks (smoke)
+        run: pixi run bench-smoke
+
+      - name: Compatibility suite (differential vs CPython sockets)
+        run: pixi run compliance
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ matrix.os }}
+          path: COMPLIANCE.md
+
+      - name: Package build (pixi-build-mojo)
+        run: pixi build

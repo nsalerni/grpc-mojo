@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.11
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Cache protobuf conformance runner
+        id: conformance-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/conformance/conformance_test_runner
+          key: conformance-runner-v29.3-${{ runner.os }}
+
+      - name: Build protobuf conformance runner
+        if: steps.conformance-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake ninja-build
+          git clone --depth 1 --branch v29.3 https://github.com/protocolbuffers/protobuf ~/protobuf-src
+          cd ~/protobuf-src && git submodule update --init --recursive --depth 1
+          cmake -G Ninja -B build -Dprotobuf_BUILD_CONFORMANCE=ON -Dprotobuf_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+          ninja -C build conformance_test_runner
+          mkdir -p ~/conformance && cp build/conformance_test_runner ~/conformance/
+
+      - name: Docstring coverage (mojo doc gate)
+        run: |
+          total=0
+          for f in src/proto/*.mojo; do
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+            if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
+          done
+          test "$total" = "0"
+
+      - name: Unit tests
+        run: pixi run test
+
+      - name: Benchmarks (smoke)
+        run: pixi run bench-smoke
+
+      - name: Compatibility suite (differential vs Python protobuf + Google conformance)
+        run: CONFORMANCE_RUNNER=$HOME/conformance/conformance_test_runner pixi run compliance
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ matrix.os }}
+          path: COMPLIANCE.md
+
+      - name: Package build (pixi-build-mojo)
+        run: pixi build

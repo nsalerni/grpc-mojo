@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.11
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2)
+        env:
+          MOJO_NET_DEPLOY_KEY: ${{ secrets.MOJO_NET_DEPLOY_KEY }}
+          PROTOMOJO_DEPLOY_KEY: ${{ secrets.PROTOMOJO_DEPLOY_KEY }}
+          MOJO_HTTP2_DEPLOY_KEY: ${{ secrets.MOJO_HTTP2_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          for dep in mojo-net protomojo mojo-http2; do
+            var=$(echo "${dep}_DEPLOY_KEY" | tr '[:lower:]-' '[:upper:]_')
+            eval "echo \"\$$var\"" > ~/.ssh/dep_$dep
+            chmod 600 ~/.ssh/dep_$dep
+            printf "Host github.com-%s\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/dep_%s\n" "$dep" "$dep" >> ~/.ssh/config
+          done
+          GIT_URL_TEMPLATE="git@github.com-{name}:nsalerni/{name}.git" python3 tools/fetch_deps.py
+
+      - name: Install h2spec
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install h2spec
+          else
+            curl -sL https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz | tar xz
+            sudo mv h2spec /usr/local/bin/
+          fi
+
+      - name: Docstring coverage (mojo doc gate)
+        run: |
+          total=0
+          for f in src/grpc/*.mojo; do
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+            if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
+          done
+          test "$total" = "0"
+
+      - name: Unit suites (spec vectors + reference goldens)
+        run: pixi run test
+
+      - name: Benchmarks (smoke)
+        run: pixi run bench-smoke
+
+      - name: Compliance suite (differential vs reference implementations)
+        run: pixi run compliance
+
+      - name: Official gRPC interop cases (both directions vs grpcio)
+        run: pixi run interop-official
+
+      - name: Upload compliance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ matrix.os }}
+          path: |
+            docs/COMPLIANCE.md
+            docs/COMPLIANCE.html

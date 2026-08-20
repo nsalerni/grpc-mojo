@@ -1,0 +1,20 @@
+grpc-mojo
+Copyright (c) 2026 the grpc-mojo contributors
+
+This product includes material from third parties:
+
+- gRPC interop testing protocol definitions
+  (test/interop/official/messages.proto, empty.proto)
+  Copyright gRPC authors. Licensed under the Apache License 2.0.
+  https://github.com/grpc/grpc
+
+- Generated test code under test/conformance/gen/ is derived from
+  Google's protobuf conformance and well-known-type .proto definitions.
+  Copyright Google LLC. Licensed under the protobuf license (BSD-3-Clause).
+  https://github.com/protocolbuffers/protobuf
+
+- The HPACK static and Huffman tables (packages/mojo-http2/src/hpack/
+  tables.mojo) are generated from the text of IETF RFC 7541.
+
+gRPC is a trademark of The Linux Foundation. Mojo is a trademark of
+Modular Inc. This project is not affiliated with or endorsed by either.

@@ -1,0 +1,14 @@
+{
+  "dir": "packages",
+  "deps": {
+    "mojo-net": {
+      "ref": "main"
+    },
+    "protomojo": {
+      "ref": "main"
+    },
+    "mojo-http2": {
+      "ref": "main"
+    }
+  }
+}

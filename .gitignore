@@ -1,0 +1,19 @@
+# pixi environments
+.pixi/
+*.egg-info
+
+# build outputs
+build/
+*.mojopkg
+*.bin
+
+# editor
+.DS_Store
+.vscode/
+.idea/
+*.conda
+__pycache__/
+*.pyc
+
+# fetched source dependencies
+/packages/

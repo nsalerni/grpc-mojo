@@ -1,0 +1,523 @@
+# ===----------------------------------------------------------------------=== #
+# Copyright (c) 2026 the grpc-mojo contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+# ===----------------------------------------------------------------------=== #
+
+"""Client channel: gRPC calls over one plaintext HTTP/2 (h2c) connection.
+
+`GrpcChannel` multiplexes calls onto a single `Http2Connection`. Unary
+calls go through `unary` (typed, raises on non-OK) or `unary_bytes`
+(returns a full `CallResult`); streaming calls compose the primitives
+`start_call`, `send_msg`, `recv_msg`, `close_send`, and `finish`.
+
+Deadlines are enforced client-side: `start_call(timeout_ns=...)` sends the
+`grpc-timeout` header and records an absolute monotonic deadline, receive
+paths arm the socket read timeout (SO_RCVTIMEO) with the remaining budget,
+and on expiry the call is cancelled with RST_STREAM(CANCEL) and surfaces
+`DEADLINE_EXCEEDED`.
+"""
+
+from std.time import monotonic
+
+from hpack import HeaderField
+from h2 import ERR_CANCEL, Http2Connection
+from net import TCPStream, is_timeout_error
+from proto import ProtoMessage, decode, encode
+
+from .framing import recv_message, send_message
+from .metadata import Metadata, decode_bin_value
+from .status import (
+    Status,
+    StatusCode,
+    http_status_to_grpc,
+    percent_decode_message,
+    rst_code_to_grpc,
+)
+from .timeout import encode_timeout
+
+comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.1.0"
+"""Value sent in the user-agent request header."""
+
+
+@fieldwise_init
+struct CallResult(Movable):
+    """Everything a finished unary call produced."""
+
+    var status: Status
+    """The call's final status, from trailers (or synthesized)."""
+    var initial_metadata: Metadata
+    """Custom metadata from the initial response headers."""
+    var trailing_metadata: Metadata
+    """Custom metadata from the trailers."""
+    var response: List[Byte]
+    """Serialized response message; empty when status is not OK."""
+
+
+@fieldwise_init
+struct GrpcChannel(Movable):
+    """A plaintext (h2c) client channel to one host:port.
+
+    Owns one HTTP/2 connection and issues calls over it. Create with
+    `connect`; make unary calls with `unary`/`unary_bytes`, or drive
+    streaming calls with `start_call`, `send_msg`/`send_request_bytes`,
+    `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
+    """
+
+    var conn: Http2Connection
+    """The underlying HTTP/2 connection."""
+    var authority: String
+    """Value for the `:authority` pseudo-header (host:port)."""
+    var deadline_ns: Int64
+    """Absolute monotonic deadline for the current call; 0 = none."""
+
+    @staticmethod
+    def connect(host: StringSpan, port: UInt16) raises -> GrpcChannel:
+        """Opens a TCP connection and performs the HTTP/2 client preface.
+
+        Args:
+            host: Server host name or address.
+            port: Server TCP port.
+
+        Returns:
+            A ready channel with `authority` set to `host:port`.
+
+        Raises:
+            On connection failure or an HTTP/2 handshake error.
+        """
+        var tcp = TCPStream.connect(host, port)
+        var conn = Http2Connection(tcp^, is_client=True)
+        return GrpcChannel(
+            conn=conn^,
+            authority=String(host) + ":" + String(port),
+            deadline_ns=0,
+        )
+
+    def _arm_deadline(mut self) raises -> Bool:
+        """Set the socket read timeout to the remaining call budget.
+        Returns False if the deadline has already passed."""
+        if self.deadline_ns == 0:
+            return True
+        var remaining = self.deadline_ns - Int64(monotonic())
+        if remaining <= 0:
+            return False
+        self.conn.tcp.set_read_timeout(remaining)
+        return True
+
+    def _clear_deadline(mut self) raises:
+        if self.deadline_ns != 0:
+            self.deadline_ns = 0
+            self.conn.tcp.set_read_timeout(0)
+
+    def cancel(mut self, sid: UInt32) raises:
+        """Cancels an in-flight call with RST_STREAM(CANCEL).
+
+        The stream is also marked reset locally so later reads on it fail
+        fast instead of waiting for the server.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+
+        Raises:
+            On connection I/O errors while sending the reset.
+        """
+        self.conn.send_rst_stream(sid, ERR_CANCEL)
+        self.conn._ensure_stream(sid)
+        self.conn.streams[sid].reset_code = ERR_CANCEL
+
+    def start_call(
+        mut self,
+        path: StringSpan,
+        metadata: Metadata,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> UInt32:
+        """Opens a stream and sends the gRPC Request-Headers.
+
+        Sends the pseudo-headers, `te: trailers`, `content-type:
+        application/grpc+proto`, the user agent, an optional `grpc-timeout`,
+        and the caller's custom metadata. With a timeout, the channel also
+        records an absolute deadline that the receive paths enforce.
+
+        Args:
+            path: Full method path, e.g. `/echo.Echo/Say`.
+            metadata: Custom metadata to send with the request headers.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            The stream id for use with the other call methods.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        var sid = self.conn.open_stream()
+        var headers = List[HeaderField]()
+        headers.append(
+            HeaderField(name=String(":method"), value=String("POST"))
+        )
+        headers.append(
+            HeaderField(name=String(":scheme"), value=String("http"))
+        )
+        headers.append(HeaderField(name=String(":path"), value=String(path)))
+        headers.append(
+            HeaderField(name=String(":authority"), value=self.authority.copy())
+        )
+        headers.append(HeaderField(name=String("te"), value=String("trailers")))
+        if timeout_ns > 0:
+            headers.append(
+                HeaderField(
+                    name=String("grpc-timeout"),
+                    value=encode_timeout(timeout_ns),
+                )
+            )
+        headers.append(
+            HeaderField(
+                name=String("content-type"),
+                value=String("application/grpc+proto"),
+            )
+        )
+        headers.append(
+            HeaderField(
+                name=String("user-agent"), value=String(GRPC_MOJO_USER_AGENT)
+            )
+        )
+        for e in metadata.entries:
+            headers.append(e.copy())
+        self.conn.send_headers(sid, Span(headers), end_stream=False)
+        if timeout_ns > 0:
+            self.deadline_ns = Int64(monotonic()) + timeout_ns
+        else:
+            self.deadline_ns = 0
+        return sid
+
+    def send_request_bytes(
+        mut self, sid: UInt32, payload: Span[Byte, _], *, last: Bool
+    ) raises:
+        """Sends one serialized request message on a call.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+            payload: The serialized message bytes.
+            last: Whether this is the final request message; if True the
+                request stream is half-closed (END_STREAM).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        send_message(self.conn, sid, payload, end_stream=last)
+
+    def close_send(mut self, sid: UInt32) raises:
+        """Half-closes the request stream without a message.
+
+        Sends an empty DATA frame with END_STREAM, as the spec prescribes
+        for ending the request stream after the last message.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        var empty = List[Byte]()
+        self.conn.send_data(sid, Span(empty), end_stream=True)
+
+    def recv_response_bytes(
+        mut self, sid: UInt32
+    ) raises -> Optional[List[Byte]]:
+        """Receives the next serialized response message.
+
+        Unlike `recv_msg`, this does not arm the call deadline; use it when
+        managing timeouts manually.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+
+        Returns:
+            The message bytes, or None when the response stream ends.
+
+        Raises:
+            On framing or connection errors.
+        """
+        return recv_message(self.conn, sid)
+
+    def send_msg[
+        M: ProtoMessage
+    ](mut self, sid: UInt32, msg: M, *, last: Bool = False) raises:
+        """Sends one typed message on a streaming call.
+
+        Parameters:
+            M: The request message type.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+            msg: The message to encode and send.
+            last: Whether this is the final request message; if True the
+                request stream is half-closed.
+
+        Raises:
+            On encoding or connection errors.
+        """
+        send_message(self.conn, sid, Span(encode(msg)), end_stream=last)
+
+    def recv_msg[M: ProtoMessage](mut self, sid: UInt32) raises -> Optional[M]:
+        """Receives the next typed message; None when the stream ends.
+
+        Honors the call deadline set in `start_call`: the socket read
+        timeout is armed with the remaining budget, and on expiry the call
+        is cancelled with RST_STREAM(CANCEL) and DEADLINE_EXCEEDED is
+        raised.
+
+        Parameters:
+            M: The response message type.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+
+        Returns:
+            The decoded message, or None on end of the response stream.
+
+        Raises:
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            decoding, framing, or connection errors.
+        """
+        if not self._arm_deadline():
+            self.cancel(sid)
+            raise Error("grpc: DEADLINE_EXCEEDED")
+        try:
+            var raw = recv_message(self.conn, sid)
+            if raw:
+                return decode[M](Span(raw.value()))
+            return None
+        except e:
+            if is_timeout_error(e):
+                self.cancel(sid)
+                raise Error("grpc: DEADLINE_EXCEEDED")
+            raise e
+
+    def finish(mut self, sid: UInt32) raises -> CallResult:
+        """Waits for the stream to end and assembles status plus metadata.
+
+        Extracts `grpc-status`, `grpc-message` (percent-decoded), and
+        `grpc-status-details-bin` from the trailers — or from the only
+        HEADERS block of a Trailers-Only response — and maps RST_STREAM or
+        bare HTTP errors to gRPC codes when the server sent no status.
+
+        Args:
+            sid: The stream id returned by `start_call`.
+
+        Returns:
+            The call result; its `response` field is left empty (streaming
+            responses are consumed via `recv_msg`).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        self.conn.wait_stream_end(sid)
+        var status = self._extract_status(sid)
+        var initial = Metadata()
+        var trailing = Metadata()
+        if self.conn.streams[sid].headers_done:
+            initial = Metadata.from_headers(
+                Span(self.conn.streams[sid].headers)
+            )
+        if self.conn.streams[sid].trailers_done:
+            trailing = Metadata.from_headers(
+                Span(self.conn.streams[sid].trailers)
+            )
+        return CallResult(
+            status=status^,
+            initial_metadata=initial^,
+            trailing_metadata=trailing^,
+            response=List[Byte](),
+        )
+
+    def _find_header(
+        self, fields: Span[HeaderField, _], name: StaticString
+    ) -> Optional[String]:
+        for f in fields:
+            if f.name == String(name):
+                return f.value.copy()
+        return None
+
+    def _extract_status(mut self, sid: UInt32) raises -> Status:
+        # RST_STREAM → mapped code.
+        if self.conn.streams[sid].reset_code:
+            var rst = self.conn.streams[sid].reset_code.value()
+            return Status(
+                code=rst_code_to_grpc(rst),
+                message=String("stream reset by server (RST_STREAM)"),
+            )
+        # Prefer trailers; a Trailers-Only response carries grpc-status in
+        # the (only) HEADERS block, which we stored as headers.
+        var source: List[HeaderField]
+        if self.conn.streams[sid].trailers_done:
+            source = self.conn.streams[sid].trailers.copy()
+        elif self.conn.streams[sid].headers_done:
+            source = self.conn.streams[sid].headers.copy()
+        else:
+            return Status(
+                code=StatusCode.INTERNAL,
+                message=String("stream ended without headers"),
+            )
+        # Broken/proxy responses: non-200 :status without grpc-status.
+        var grpc_status = self._find_header(Span(source), "grpc-status")
+        if not grpc_status:
+            var http_status = self._find_header(
+                Span(self.conn.streams[sid].headers), ":status"
+            )
+            var code = StatusCode.UNKNOWN
+            var msg = String("missing grpc-status")
+            if http_status:
+                var hs = 200
+                try:
+                    hs = Int(http_status.value())
+                except:
+                    pass  # non-numeric :status: keep UNKNOWN
+                if hs != 200:
+                    code = http_status_to_grpc(hs)
+                    msg = String("HTTP status ") + http_status.value()
+            return Status(code=code, message=msg^)
+        var code: Int
+        try:
+            code = Int(grpc_status.value())
+        except:
+            # A peer that sends a non-numeric grpc-status is broken; map
+            # it to UNKNOWN rather than surfacing a parse error.
+            return Status(
+                code=StatusCode.UNKNOWN,
+                message=String("invalid grpc-status: ") + grpc_status.value(),
+            )
+        var message = String()
+        var raw_msg = self._find_header(Span(source), "grpc-message")
+        if raw_msg:
+            message = percent_decode_message(raw_msg.value())
+        var status = Status(code=code, message=message^)
+        var details = self._find_header(Span(source), "grpc-status-details-bin")
+        if details:
+            try:
+                status.details_bin = decode_bin_value(details.value())
+            except:
+                pass  # tolerate broken encodings, like grpc-message
+        return status^
+
+    def unary_bytes(
+        mut self,
+        path: StringSpan,
+        request: Span[Byte, _],
+        metadata: Metadata,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> CallResult:
+        """One request message in, one response message out, as bytes.
+
+        Enforces the deadline: on expiry the call is cancelled with
+        RST_STREAM(CANCEL) and DEADLINE_EXCEEDED is returned. Non-OK
+        statuses are returned in the result, not raised, so callers can
+        inspect trailing metadata and `Status.details_bin`. An OK status
+        with no response message is reported as INTERNAL.
+
+        Args:
+            path: Full method path, e.g. `/echo.Echo/Say`.
+            request: The serialized request message.
+            metadata: Custom metadata to send with the request headers.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            The final status, both metadata sets, and the serialized
+            response (empty when the status is not OK).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors other than a
+            deadline expiry.
+        """
+        var sid = self.start_call(path, metadata, timeout_ns=timeout_ns)
+        self.send_request_bytes(sid, request, last=True)
+        var response = List[Byte]()
+        var had_msg: Bool
+        try:
+            if not self._arm_deadline():
+                raise Error("net: timeout")
+            self.conn.wait_headers(sid)
+            if not self._arm_deadline():
+                raise Error("net: timeout")
+            # A failed call may carry no response message; try to read one
+            # but treat a clean end as "no message"; the status decides.
+            var msg = self.recv_response_bytes(sid)
+            had_msg = Bool(msg)
+            if msg:
+                response = msg.take()
+        except e:
+            if is_timeout_error(e):
+                try:
+                    self.cancel(sid)
+                except:
+                    pass
+                self._clear_deadline()
+                return CallResult(
+                    status=Status(
+                        code=StatusCode.DEADLINE_EXCEEDED,
+                        message=String("Deadline Exceeded"),
+                    ),
+                    initial_metadata=Metadata(),
+                    trailing_metadata=Metadata(),
+                    response=List[Byte](),
+                )
+            self._clear_deadline()
+            raise e
+        var result = self.finish(sid)
+        self._clear_deadline()
+        if result.status.is_ok() and not had_msg:
+            result.status = Status(
+                code=StatusCode.INTERNAL,
+                message=String("OK status but no response message"),
+            )
+        result.response = response^
+        return result^
+
+    def unary[
+        Req: ProtoMessage, Resp: ProtoMessage
+    ](
+        mut self,
+        path: StringSpan,
+        request: Req,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> Resp:
+        """Typed unary call; raises on non-OK status.
+
+        Convenience wrapper over `unary_bytes` with empty metadata. Use
+        `unary_bytes` directly to send metadata or inspect the trailers of
+        a failed call.
+
+        Parameters:
+            Req: The request message type.
+            Resp: The response message type.
+
+        Args:
+            path: Full method path, e.g. `/echo.Echo/Say`.
+            request: The request message.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            The decoded response message.
+
+        Raises:
+            The call's `Status` converted to an error when it is not OK
+            (including DEADLINE_EXCEEDED); otherwise on decoding or
+            connection errors.
+        """
+        var md = Metadata()
+        var result = self.unary_bytes(
+            path, Span(encode(request)), md, timeout_ns=timeout_ns
+        )
+        if not result.status.is_ok():
+            raise result.status.to_error()
+        return decode[Resp](Span(result.response))
+
+    def close(mut self):
+        """Closes the underlying connection; the channel is unusable after."""
+        self.conn.close()
