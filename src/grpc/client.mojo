@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Client channel: gRPC calls over one plaintext HTTP/2 (h2c) connection.
+"""Client channel: gRPC calls over one h2c or TLS HTTP/2 connection.
 
 `GrpcChannel` multiplexes calls onto a single `Http2Connection`. Unary
 calls go through `unary` (typed, raises on non-OK) or `unary_bytes`
@@ -27,6 +27,7 @@ from std.time import monotonic
 from hpack import HeaderField
 from h2 import ERR_CANCEL, Http2Connection
 from net import TCPStream, is_timeout_error
+from tls import TLSContext
 from proto import ProtoMessage, decode, encode
 
 from .framing import recv_message, send_message
@@ -39,6 +40,7 @@ from .status import (
     rst_code_to_grpc,
 )
 from .timeout import encode_timeout
+from .transport import GrpcTransport
 
 comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.1.0"
 """Value sent in the user-agent request header."""
@@ -60,7 +62,7 @@ struct CallResult(Movable):
 
 @fieldwise_init
 struct GrpcChannel(Movable):
-    """A plaintext (h2c) client channel to one host:port.
+    """A client channel to one host and port over h2c or TLS.
 
     Owns one HTTP/2 connection and issues calls over it. Create with
     `connect`; make unary calls with `unary`/`unary_bytes`, or drive
@@ -68,10 +70,12 @@ struct GrpcChannel(Movable):
     `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
     """
 
-    var conn: Http2Connection[TCPStream]
+    var conn: Http2Connection[GrpcTransport]
     """The underlying HTTP/2 connection."""
     var authority: String
     """Value for the `:authority` pseudo-header (host:port)."""
+    var scheme: String
+    """Value for the `:scheme` pseudo-header (`http` or `https`)."""
     var deadline_ns: Int64
     """Absolute monotonic deadline for the current call; 0 = none."""
 
@@ -90,10 +94,58 @@ struct GrpcChannel(Movable):
             On connection failure or an HTTP/2 handshake error.
         """
         var tcp = TCPStream.connect(host, port)
-        var conn = Http2Connection(tcp^, is_client=True)
+        var transport = GrpcTransport.plaintext(tcp^)
+        var conn = Http2Connection(transport^, is_client=True)
         return GrpcChannel(
             conn=conn^,
             authority=String(host) + ":" + String(port),
+            scheme=String("http"),
+            deadline_ns=0,
+        )
+
+    @staticmethod
+    def connect_tls(
+        host: StringSpan,
+        port: UInt16,
+        *,
+        server_name: String = "",
+        ca_file: String = "",
+    ) raises -> GrpcChannel:
+        """Opens a verified TLS connection with mandatory `h2` ALPN.
+
+        Args:
+            host: Server host name or address used for the TCP connection.
+            port: Server TCP port.
+            server_name: Name used for SNI and hostname verification;
+                empty uses `host`.
+            ca_file: PEM trust bundle; empty uses the system trust store.
+
+        Returns:
+            A ready TLS channel with `:scheme` set to `https`.
+
+        Raises:
+            On TCP or TLS failure, certificate rejection, missing `h2`
+            ALPN negotiation, or an HTTP/2 handshake error.
+        """
+        var context = TLSContext.client(
+            verify=True, ca_file=ca_file, alpn=[String("h2")]
+        )
+        var tcp = TCPStream.connect(host, port)
+        var name = server_name
+        if name == "":
+            name = String(host)
+        var tls = context.connect(tcp^, name)
+        if tls.negotiated_alpn() != "h2":
+            tls.close()
+            raise Error(
+                "grpc: TLS peer did not negotiate the required h2 ALPN token"
+            )
+        var transport = GrpcTransport.secure(tls^)
+        var conn = Http2Connection(transport^, is_client=True)
+        return GrpcChannel(
+            conn=conn^,
+            authority=name.copy() + ":" + String(port),
+            scheme=String("https"),
             deadline_ns=0,
         )
 
@@ -160,7 +212,7 @@ struct GrpcChannel(Movable):
             HeaderField(name=String(":method"), value=String("POST"))
         )
         headers.append(
-            HeaderField(name=String(":scheme"), value=String("http"))
+            HeaderField(name=String(":scheme"), value=self.scheme.copy())
         )
         headers.append(HeaderField(name=String(":path"), value=String(path)))
         headers.append(

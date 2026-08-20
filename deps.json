@@ -9,6 +9,9 @@
     },
     "mojo-http2": {
       "ref": "main"
+    },
+    "mojo-tls": {
+      "ref": "main"
     }
   }
 }

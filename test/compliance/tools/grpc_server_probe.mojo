@@ -8,6 +8,8 @@
 #                            response metadata + trailers (ascii and -bin)
 #   /probe.Probe/FailUnicode raises an error with unicode + '%' in it
 
+from std.sys import argv
+
 from echo_pb import EchoRequest, EchoResponse
 from grpc import Server, ServerContext
 
@@ -53,7 +55,12 @@ def fail_rich(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
 
 
 def main() raises:
-    var server = Server("127.0.0.1", 0)
+    var args = argv()
+    var server: Server
+    if len(args) >= 3:
+        server = Server.tls("127.0.0.1", 0, args[1], args[2])
+    else:
+        server = Server("127.0.0.1", 0)
     server.register_unary[echo]("/probe.Probe/Echo")
     server.register_unary[timeout]("/probe.Probe/Timeout")
     server.register_unary[meta_echo]("/probe.Probe/MetaEcho")

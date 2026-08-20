@@ -271,7 +271,16 @@ def main() raises:
     var args = argv()
     var port = UInt16(Int(args[1]))
     var case_name = args[2]
-    var channel = GrpcChannel.connect("127.0.0.1", port)
+    var channel: GrpcChannel
+    if len(args) >= 6 and args[3] == "tls":
+        channel = GrpcChannel.connect_tls(
+            "127.0.0.1",
+            port,
+            ca_file=args[4],
+            server_name=args[5],
+        )
+    else:
+        channel = GrpcChannel.connect("127.0.0.1", port)
 
     if case_name == "empty_unary":
         case_empty_unary(channel)

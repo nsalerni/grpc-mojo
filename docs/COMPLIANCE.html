@@ -85,16 +85,19 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">56/56</span><span>checks passed</span><span class="when">2026-08-20 20:25 UTC</span></div>
+<div class="verdict"><span class="score">70/70</span><span>checks passed</span><span class="when">2026-08-20 23:13 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">6/6</span></li>
 <li>net <span class="n">9/9</span></li>
+<li>tls <span class="n">6/6</span></li>
 <li>grpc <span class="n">23/23</span></li>
-<li>packaging <span class="n">5/5</span></li>
+<li>grpc-tls <span class="n">3/3</span></li>
+<li>packaging <span class="n">6/6</span></li>
 <li>units <span class="n">2/2</span></li>
+<li>h2_tls <span class="n">4/4</span></li>
 </ul></header>
 <section>
 <h2><span class="pkg">proto</span> <span class="vs">vs</span> Python protobuf</h2>
@@ -129,7 +132,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>mojo client vs hyper-h2 server (200KB echo, strict validation)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo client reassembles HEADERS+CONTINUATION (32KB header block) and padded DATA</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>hyper-h2 client vs mojo server (50KB echo, strict validation)</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>h2spec full run (146 tests, 146 passed, 0 skipped, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>h2spec cleartext full run (146 tests, 146 passed, 0 skipped, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">net</span> <span class="vs">vs</span> CPython sockets</h2>
@@ -145,6 +148,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>mojo unix-socket client 1MiB roundtrip vs CPython server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>one Poller event loop echoes to 20 concurrent CPython clients</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Poller readiness sequence matches CPython selectors</td><td class="result"><span class="pass">PASS</span></td></tr>
+</table></div></section>
+<section>
+<h2><span class="pkg">tls</span> <span class="vs">vs</span> CPython ssl</h2>
+<p class="method">Live TLS connections with CPython on the other end in both roles: version negotiation, ALPN agreement and no-overlap behavior, chain and hostname verification, bulk transfer, and a bad-certificate corpus both implementations must reject.</p>
+<div class="tablewrap"><table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>mojo client vs CPython server: TLSv1.3, ALPN h2, 256KB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>mojo client negotiates TLSv1.2 with a 1.2-capped server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>CPython verifying client vs mojo server: chain, hostname, ALPN, echo</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>both reject an untrusted (self-signed) certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>both reject a hostname mismatch on a CA-signed certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ALPN no overlap: our server alerts fatally, our client tolerates a server that proceeds without</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc</span> <span class="vs">vs</span> grpcio</h2>
@@ -176,23 +191,43 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>10 sequential calls on one connection</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
+<h2><span class="pkg">grpc over TLS</span> <span class="vs">vs</span> grpcio</h2>
+<p class="method">TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo.</p>
+<div class="tablewrap"><table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Mojo TLS client: 64 KiB unary echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS client rejects a grpcio certificate hostname mismatch</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio TLS client: unary echo via Mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
+</table></div></section>
+<section>
 <h2>Extraction isolation</h2>
-<p class="method">Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check — the mechanical proof behind independent open-sourcing.</p>
+<p class="method">Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check. This is the mechanical proof behind independent open-sourcing.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>`net` builds and runs staged with stdlib only</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>`hpack` builds and runs staged with stdlib only</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>`proto` builds and runs staged with stdlib only</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>`h2` builds and runs staged with hpack + net</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>`grpc` builds and runs staged with h2 + hpack + net + proto</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>`tls` builds and runs staged with net</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>`h2` builds and runs staged with hpack + net + tls</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>`grpc` builds and runs staged with h2 + hpack + net + proto + tls</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2>Spec-vector unit suites</h2>
 <p class="method">The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td>unit test files (18/18 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>unit test files (21/21 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>interop suite (interop: 7 passed, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+</table></div></section>
+<section>
+<h2>h2_tls</h2>
+<p class="method"></p>
+<div class="tablewrap"><table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>mojo client vs CPython ssl + hyper-h2 server (80KB echo, ALPN h2)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>CPython ssl + hyper-h2 client vs mojo server (verified TLS, ALPN h2)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>both HTTP/2 roles reject TLS connections without negotiated h2 ALPN</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>h2spec TLS full run (146 tests, 146 passed, 0 skipped, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section><h2>Environment</h2>
 <div class="tablewrap"><table class="envtable">
@@ -206,10 +241,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>platform</td><td>Darwin 27.0.0 arm64</td></tr>
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>
-<li><strong>Compression</strong> &mdash; grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded.</li>
-<li><strong>TLS</strong> &mdash; h2c plaintext only (PRIMITIVES.md #3).</li>
-<li><strong>Concurrency</strong> &mdash; connections served sequentially and bidi is receive-driven until Mojo exposes threads/async (PRIMITIVES.md #7).</li>
-<li><strong>hpack value encoding</strong> &mdash; header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
+<li><strong>Compression</strong>: grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded.</li>
+<li><strong>Concurrency</strong>: connections served sequentially and bidi is receive-driven until Mojo exposes threads/async (PRIMITIVES.md #7).</li>
+<li><strong>hpack value encoding</strong>: header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
 </ul></section>
 <footer>Generated by test/compliance/run_compliance.py &middot; rerun with <code>pixi run compliance</code> &middot; canonical copy: docs/COMPLIANCE.md</footer>
 </main>

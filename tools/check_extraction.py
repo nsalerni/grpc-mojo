@@ -23,8 +23,9 @@ PACKAGES: dict[str, list[str]] = {
     "net": [],
     "hpack": [],
     "proto": [],
-    "h2": ["hpack", "net"],
-    "grpc": ["h2", "hpack", "net", "proto"],
+    "tls": ["net"],
+    "h2": ["hpack", "net", "tls"],
+    "grpc": ["h2", "hpack", "net", "proto", "tls"],
 }
 
 # package -> source directory inside this monorepo
@@ -33,6 +34,7 @@ LOCATIONS: dict[str, str] = {
     "hpack": "packages/mojo-http2/src/hpack",
     "h2": "packages/mojo-http2/src/h2",
     "proto": "packages/protomojo/src/proto",
+    "tls": "packages/mojo-tls/src/tls",
     "grpc": "src/grpc",
 }
 
@@ -83,6 +85,12 @@ def main() raises:
     if tag[0] != 1 or r.int32_value() != 150:
         raise Error("wire roundtrip mismatch")
     print("proto-smoke-ok")
+""",
+    "tls": """\
+from tls import TLSContext, TLSStream
+
+def main():
+    print("tls-smoke-ok")
 """,
     "h2": """\
 from h2 import FrameHeader, Http2Connection, Settings
@@ -139,16 +147,12 @@ def check(pkg: str, verbose: bool = True) -> tuple[bool, str]:
             )
         smoke = tmp / "smoke.mojo"
         smoke.write_text(SMOKE[pkg])
-        binary = tmp / "smoke"
         r = subprocess.run(
-            ["mojo", "build", "-I", str(stage), str(smoke), "-o", str(binary)],
+            ["mojo", "run", "-I", str(stage), str(smoke)],
             capture_output=True, text=True, timeout=600,
         )
         if r.returncode != 0:
-            return False, f"build failed: {r.stderr[-400:]}"
-        r = subprocess.run(
-            [str(binary)], capture_output=True, text=True, timeout=60
-        )
+            return False, f"build or run failed: {r.stderr[-400:]}"
         if r.returncode != 0 or f"{pkg}-smoke-ok" not in r.stdout:
             return False, f"smoke run failed: {r.stdout!r} {r.stderr[-200:]!r}"
     return True, ""

@@ -39,8 +39,9 @@ listed here, so any of them can be extracted into a standalone repo unchanged:
 | `net`   | `packages/mojo-net` | stdlib only | Sockets, DNS, TCP/UDP |
 | `hpack` | `packages/mojo-http2` | stdlib only | HPACK header compression |
 | `proto` | `packages/protomojo` | stdlib only | Protobuf wire format + runtime |
-| `h2`    | `packages/mojo-http2` | `hpack`, `net` | HTTP/2 framing, connection, streams |
-| `grpc`  | `src/grpc` | `h2`, `proto`, `net` | gRPC protocol, client, server |
+| `tls`   | `packages/mojo-tls` | `net`, libssl | TLS 1.2/1.3, X.509 verification, ALPN |
+| `h2`    | `packages/mojo-http2` | `hpack`, `net`, `tls` | HTTP/2 framing, connection, streams |
+| `grpc`  | `src/grpc` | `h2`, `proto`, `net`, `tls` | gRPC protocol, client, server |
 
 Each `packages/<repo>` directory is a self-contained image of its future
 standalone repository: own manifest, tests, README, and license
@@ -104,16 +105,17 @@ descriptor semantics.
 * Server: service registry keyed by `/package.Service/Method` path, unary and
   streaming handlers, Trailers-Only for immediate errors, 415 for non-gRPC
   content types.
+* Transport: h2c over `TCPStream`, or verified TLS over `TLSStream` with the
+  `h2` ALPN token required in both roles.
 
 ## Concurrency model
 
 Mojo 1.0 has `async fn` and an internal `TaskGroup` runtime, but no public,
-stable async I/O story (no reactor, no async sockets). grpc-mojo therefore
-uses **blocking I/O** in v0: the server dispatches each connection on the
-built-in runtime's thread pool; the client multiplexes one connection with
-blocking reads. The transport is isolated behind small interfaces so the
-event-loop transport (PRIMITIVES.md item 2) can replace it without touching
-`proto`, `hpack`, or the gRPC protocol layer.
+stable async I/O story (no public task API or async sockets). grpc-mojo
+therefore uses **blocking I/O** in v0: the server serves connections
+sequentially, while the client multiplexes streams on one connection with
+blocking reads. `GrpcTransport` keeps the h2c and TLS choices below the gRPC
+protocol layer.
 
 ## Testing strategy
 
@@ -121,12 +123,12 @@ event-loop transport (PRIMITIVES.md item 2) can replace it without touching
   examples from protobuf.dev, and golden bytes produced by Python's
   `grpcio`/`protobuf` are checked into `test/`.
 * **Interop**: `test/interop/` runs the Mojo client against a `grpcio` Python
-  server and vice versa (h2c, no TLS) — the definition of "compatible" is
+  server and vice versa over h2c and TLS. The definition of "compatible" is
   "talks to the reference implementation".
 * Unit tests use `std.testing` and run with `pixi run test`.
 
 ## Out of scope for v0 (tracked in PRIMITIVES.md and issues)
 
-TLS (needs a TLS binding story), compression codecs (gzip — needs zlib
-bindings; the flag/negotiation plumbing is implemented), retries/service
+Compression codecs (gzip needs zlib bindings; the flag/negotiation plumbing
+is implemented), retries/service
 config, load balancing, channelz/reflection/health services.

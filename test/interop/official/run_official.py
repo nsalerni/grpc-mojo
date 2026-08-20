@@ -19,6 +19,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BUILD = ROOT / "build"
 HERE = Path(__file__).resolve().parent
+CERTS = BUILD / "certs"
+MOJO_RUN = [
+    "mojo", "run",
+    "-I", "packages/mojo-net/src",
+    "-I", "packages/mojo-http2/src",
+    "-I", "packages/mojo-tls/src",
+    "-I", "packages/protomojo/src",
+    "-I", "src",
+    "-I", "test",
+    "-I", "packages/protomojo/test",
+]
 
 CASES = [
     "empty_unary",
@@ -151,19 +162,37 @@ class RefTestService(grpc.GenericRpcHandler):
 
 # --- direction A: mojo client vs grpcio server ------------------------------
 
-def run_direction_a():
-    print("== mojo interop_client vs grpcio reference server ==")
+def run_direction_a(use_tls: bool):
+    mode = "TLS" if use_tls else "h2c"
+    print(f"== mojo interop_client vs grpcio reference server ({mode}) ==")
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
     server.add_generic_rpc_handlers((RefTestService(),))
-    port = server.add_insecure_port("127.0.0.1:0")
+    if use_tls:
+        credentials = grpc.ssl_server_credentials(((
+            (CERTS / "server.key").read_bytes(),
+            (CERTS / "server.pem").read_bytes(),
+        ),))
+        port = server.add_secure_port("127.0.0.1:0", credentials)
+    else:
+        port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     try:
         for case in CASES:
+            command = [
+                *MOJO_RUN,
+                str(HERE / "interop_client.mojo"),
+                str(port),
+                case,
+            ]
+            if use_tls:
+                command.extend([
+                    "tls", str(CERTS / "ca.pem"), "localhost",
+                ])
             r = subprocess.run(
-                [str(BUILD / "interop_client"), str(port), case],
+                command,
                 capture_output=True, text=True, timeout=120, cwd=ROOT)
             ok = r.returncode == 0 and f"CASE-OK {case}" in r.stdout
-            record("mojo-client", case, ok,
+            record(f"mojo-client-{mode.lower()}", case, ok,
                    f"rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr[-200:]!r}")
     finally:
         server.stop(0)
@@ -313,40 +342,53 @@ def run_case_b(case, channel):
         raise AssertionError(f"unknown case {case}")
 
 
-def run_direction_b():
-    print("== grpcio reference client vs mojo interop_server ==")
-    proc = subprocess.Popen([str(BUILD / "interop_server")],
+def run_direction_b(use_tls: bool):
+    mode = "TLS" if use_tls else "h2c"
+    print(f"== grpcio reference client vs mojo interop_server ({mode}) ==")
+    command = [*MOJO_RUN, str(HERE / "interop_server.mojo")]
+    if use_tls:
+        command.extend([
+            str(CERTS / "server.pem"), str(CERTS / "server.key"),
+        ])
+    proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE, text=True, cwd=ROOT)
     line = proc.stdout.readline()
     port = int(line.strip().rsplit(":", 1)[-1])
     try:
-        with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+        if use_tls:
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=(CERTS / "ca.pem").read_bytes()
+            )
+            channel_context = grpc.secure_channel(
+                f"localhost:{port}", credentials
+            )
+        else:
+            channel_context = grpc.insecure_channel(f"127.0.0.1:{port}")
+        with channel_context as channel:
             for case in CASES:
                 try:
                     run_case_b(case, channel)
-                    record("grpcio-client", case, True)
+                    record(f"grpcio-client-{mode.lower()}", case, True)
                 except Exception as exc:
-                    record("grpcio-client", case, False, repr(exc)[:200])
+                    record(
+                        f"grpcio-client-{mode.lower()}",
+                        case,
+                        False,
+                        repr(exc)[:200],
+                    )
     finally:
         proc.kill()
         proc.wait()
 
 
-def build():
-    for tool in ("interop_client", "interop_server"):
-        subprocess.run(
-            ["mojo", "build", "-I", "packages/mojo-net/src", "-I", "packages/mojo-http2/src", "-I", "packages/protomojo/src", "-I", "src", "-I", "test", "-I", "packages/protomojo/test",
-             f"test/interop/official/{tool}.mojo", "-o", str(BUILD / tool)],
-            check=True, cwd=ROOT)
-
-
 def main() -> int:
     BUILD.mkdir(exist_ok=True)
-    build()
-    run_direction_a()
-    run_direction_b()
+    run_direction_a(False)
+    run_direction_a(True)
+    run_direction_b(False)
+    run_direction_b(True)
     print(f"\nofficial interop: {PASS} passed, {FAIL} failed "
-          f"({len(CASES)} cases x 2 directions)")
+          f"({len(CASES)} cases x 2 directions x 2 transports)")
     return 1 if FAIL else 0
 
 

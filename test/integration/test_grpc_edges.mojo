@@ -12,6 +12,7 @@ from grpc import (
     DEFAULT_MAX_RECV_MESSAGE_SIZE,
     GRPC_MOJO_USER_AGENT,
     GrpcChannel,
+    GrpcTransport,
     Metadata,
     Server,
     ServerCall,
@@ -247,7 +248,7 @@ struct RawRig(Movable):
     """A GrpcChannel client against a hand-driven server-side connection."""
 
     var channel: GrpcChannel
-    var server_conn: Http2Connection[TCPStream]
+    var server_conn: Http2Connection[GrpcTransport]
 
     def pump_until_headers(mut self, sid: UInt32) raises:
         while True:
@@ -270,7 +271,8 @@ def make_raw_rig() raises -> RawRig:
     var listener = TCPListener("127.0.0.1", 0)
     var channel = GrpcChannel.connect("127.0.0.1", listener.local_port)
     var server_tcp = listener.accept()
-    var server_conn = Http2Connection(server_tcp^, is_client=False)
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     return RawRig(channel=channel^, server_conn=server_conn^)
 
@@ -362,7 +364,8 @@ def test_malformed_grpc_timeout_fails_call_only() raises:
     var client_tcp = TCPStream.connect("127.0.0.1", listener.local_port)
     var client = Http2Connection(client_tcp^, is_client=True)
     var server_tcp = listener.accept()
-    var server_conn = Http2Connection(server_tcp^, is_client=False)
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     var handled = List[UInt32]()
 
@@ -412,7 +415,8 @@ def test_content_type_gate_415() raises:
     var client_tcp = TCPStream.connect("127.0.0.1", listener.local_port)
     var client = Http2Connection(client_tcp^, is_client=True)
     var server_tcp = listener.accept()
-    var server_conn = Http2Connection(server_tcp^, is_client=False)
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     var handled = List[UInt32]()
 
@@ -494,7 +498,7 @@ def streaming_abort_handler(
 struct E2ERig(Movable):
     var channel: GrpcChannel
     var server: Server
-    var server_conn: Http2Connection[TCPStream]
+    var server_conn: Http2Connection[GrpcTransport]
     var handled: List[UInt32]
 
     def pump_until_reply(mut self) raises:
@@ -513,7 +517,8 @@ def make_e2e_rig() raises -> E2ERig:
     var listener = TCPListener("127.0.0.1", 0)
     var channel = GrpcChannel.connect("127.0.0.1", listener.local_port)
     var server_tcp = listener.accept()
-    var server_conn = Http2Connection(server_tcp^, is_client=False)
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     return E2ERig(
         channel=channel^,
@@ -581,7 +586,8 @@ def test_public_unary_api() raises:
         server.register_bidi[fork_silent_handler]("/echo.Echo/Silent")
         try:
             var tcp = listener.accept()
-            var conn = Http2Connection(tcp^, is_client=False)
+            var transport = GrpcTransport.plaintext(tcp^)
+            var conn = Http2Connection(transport^, is_client=False)
             var handled = List[UInt32]()
             while True:
                 conn.process_next_frame()

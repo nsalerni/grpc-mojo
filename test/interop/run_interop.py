@@ -18,6 +18,15 @@ from concurrent import futures
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+MOJO_RUN = [
+    "mojo", "run",
+    "-I", "packages/mojo-net/src",
+    "-I", "packages/mojo-http2/src",
+    "-I", "packages/mojo-tls/src",
+    "-I", "packages/protomojo/src",
+    "-I", "src",
+    "-I", "examples",
+]
 
 # --- generate python stubs for examples/echo.proto ---
 
@@ -54,32 +63,13 @@ def check(name: str, cond: bool, detail: str = ""):
         print(f"  FAIL {name} {detail}")
 
 
-def build_mojo(target: str, out: str):
-    subprocess.run(
-        [
-            "mojo",
-            "build",
-            "-I", "packages/mojo-net/src",
-            "-I", "packages/mojo-http2/src",
-            "-I", "packages/protomojo/src",
-            "-I", "src",
-            "-I",
-            "examples",
-            f"examples/{target}.mojo",
-            "-o",
-            out,
-        ],
-        cwd=ROOT,
-        check=True,
-    )
-
-
 def test_python_client_to_mojo_server():
     print("== Python grpcio client -> Mojo server ==")
-    binary = f"{_tmp}/echo_server"
-    build_mojo("echo_server", binary)
     proc = subprocess.Popen(
-        [binary], stdout=subprocess.PIPE, text=True, cwd=ROOT
+        [*MOJO_RUN, "examples/echo_server.mojo"],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
     )
     try:
         line = proc.stdout.readline()
@@ -147,10 +137,13 @@ def test_mojo_client_to_python_server():
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     try:
-        binary = f"{_tmp}/echo_client"
-        build_mojo("echo_client", binary)
         result = subprocess.run(
-            [binary, str(port), "mojo says hi"],
+            [
+                *MOJO_RUN,
+                "examples/echo_client.mojo",
+                str(port),
+                "mojo says hi",
+            ],
             capture_output=True,
             text=True,
             timeout=30,

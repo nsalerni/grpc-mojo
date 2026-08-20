@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -22,21 +23,8 @@ jobs:
           pixi-version: latest
           cache: true
 
-      - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2)
-        env:
-          MOJO_NET_DEPLOY_KEY: ${{ secrets.MOJO_NET_DEPLOY_KEY }}
-          PROTOMOJO_DEPLOY_KEY: ${{ secrets.PROTOMOJO_DEPLOY_KEY }}
-          MOJO_HTTP2_DEPLOY_KEY: ${{ secrets.MOJO_HTTP2_DEPLOY_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-          for dep in mojo-net protomojo mojo-http2; do
-            var=$(echo "${dep}_DEPLOY_KEY" | tr '[:lower:]-' '[:upper:]_')
-            eval "echo \"\$$var\"" > ~/.ssh/dep_$dep
-            chmod 600 ~/.ssh/dep_$dep
-            printf "Host github.com-%s\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/dep_%s\n" "$dep" "$dep" >> ~/.ssh/config
-          done
-          GIT_URL_TEMPLATE="git@github.com-{name}:nsalerni/{name}.git" python3 tools/fetch_deps.py
+      - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2, mojo-tls)
+        run: python3 tools/fetch_deps.py
 
       - name: Install h2spec
         run: |
@@ -51,7 +39,10 @@ jobs:
         run: |
           total=0
           for f in src/grpc/*.mojo; do
-            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null \
+              -I packages/mojo-net/src -I packages/mojo-http2/src \
+              -I packages/mojo-tls/src -I packages/protomojo/src -I src \
+              "$f" 2>&1 | grep -c warning || true)
             if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
           done
           test "$total" = "0"

@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Server: gRPC over blocking HTTP/2 (h2c), unary and all three streaming kinds.
+"""Server: gRPC over blocking HTTP/2, with h2c and TLS transports.
 
 Handlers are thin function pointers registered at compile time via
 `Server.register_unary`, `register_server_streaming`,
@@ -37,13 +37,15 @@ from std.time import monotonic
 
 from hpack import HeaderField
 from h2 import ERR_NO_ERROR, Http2Connection
-from net import TCPListener, TCPStream
+from net import TCPListener
 from proto import ProtoMessage, decode, encode
+from tls import TLSContext
 
 from .framing import recv_message, send_message
 from .metadata import Metadata, encode_bin_value
 from .status import Status, StatusCode, percent_encode_message
 from .timeout import decode_timeout
+from .transport import GrpcTransport
 
 
 struct MethodKind:
@@ -129,7 +131,7 @@ struct ServerCall(Movable):
     Do not store a `ServerCall` beyond the handler invocation.
     """
 
-    var _conn: Pointer[Http2Connection[TCPStream], MutUntrackedOrigin]
+    var _conn: Pointer[Http2Connection[GrpcTransport], MutUntrackedOrigin]
     """Untracked pointer to the connection; valid only during dispatch."""
     var sid: UInt32
     """The HTTP/2 stream id of this call."""
@@ -383,6 +385,8 @@ struct Server(Movable):
     """TCP port to bind; 0 picks an ephemeral port."""
     var routes: Dict[String, Route]
     """Routing table from full method path to handler."""
+    var _tls_context: Optional[TLSContext]
+    """Reusable server TLS context; None selects plaintext h2c."""
 
     def __init__(out self, host: StringSpan, port: UInt16):
         """Constructs a server with an empty routing table.
@@ -395,6 +399,34 @@ struct Server(Movable):
         self.host = String(host)
         self.port = port
         self.routes = Dict[String, Route]()
+        self._tls_context = None
+
+    @staticmethod
+    def tls(
+        host: StringSpan,
+        port: UInt16,
+        cert_chain_pem: String,
+        key_pem: String,
+    ) raises -> Server:
+        """Constructs a TLS server that accepts only `h2` with ALPN.
+
+        Args:
+            host: Host or address to bind.
+            port: TCP port to bind; 0 picks an ephemeral port.
+            cert_chain_pem: Path to the PEM certificate chain.
+            key_pem: Path to the matching PEM private key.
+
+        Returns:
+            A server configured for TLS connections.
+
+        Raises:
+            If the TLS context, certificate, or key cannot be loaded.
+        """
+        var out = Server(host, port)
+        out._tls_context = TLSContext.server(
+            cert_chain_pem, key_pem, alpn=[String("h2")]
+        )
+        return out^
 
     # --- registration (typed handlers wrapped at compile time) ---
 
@@ -587,7 +619,7 @@ struct Server(Movable):
     # --- dispatch ---
 
     def _handle_stream(
-        mut self, mut conn: Http2Connection[TCPStream], sid: UInt32
+        mut self, mut conn: Http2Connection[GrpcTransport], sid: UInt32
     ) raises:
         var headers = conn.streams[sid].headers.copy()
         var call = ServerCall(
@@ -653,7 +685,7 @@ struct Server(Movable):
 
     def dispatch_ready(
         mut self,
-        mut conn: Http2Connection[TCPStream],
+        mut conn: Http2Connection[GrpcTransport],
         mut handled: List[UInt32],
     ) raises -> Int:
         """Dispatches every stream whose request HEADERS have arrived.
@@ -690,7 +722,7 @@ struct Server(Movable):
         return count
 
     def _serve_connection_impl(
-        mut self, mut conn: Http2Connection[TCPStream]
+        mut self, mut conn: Http2Connection[GrpcTransport]
     ) raises:
         var handled = List[UInt32]()
         while True:
@@ -718,10 +750,22 @@ struct Server(Movable):
         )
         while True:
             var tcp = listener.accept()
-            var conn = Http2Connection(tcp^, is_client=False)
             try:
-                self._serve_connection_impl(conn)
+                var transport: GrpcTransport
+                if self._tls_context:
+                    var tls = self._tls_context.value().accept(tcp^)
+                    if tls.negotiated_alpn() != "h2":
+                        tls.close()
+                        continue
+                    transport = GrpcTransport.secure(tls^)
+                else:
+                    transport = GrpcTransport.plaintext(tcp^)
+                var conn = Http2Connection(transport^, is_client=False)
+                try:
+                    self._serve_connection_impl(conn)
+                except:
+                    # Client disconnected or committed a protocol error.
+                    conn.close()
             except:
-                # Client disconnected (EOF) or protocol error: drop the
-                # connection and accept the next one.
-                conn.close()
+                # A failed TLS handshake does not stop the listener.
+                pass

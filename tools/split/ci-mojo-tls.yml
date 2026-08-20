@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04]
+        os: [macos-14, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -23,32 +23,22 @@ jobs:
           pixi-version: latest
           cache: true
 
-      - name: Fetch source dependencies (mojo-net, mojo-tls)
+      - name: Fetch source dependencies (mojo-net)
         run: python3 tools/fetch_deps.py
-
-      - name: Install h2spec
-        run: |
-          curl -sL https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz | tar xz
-          sudo mv h2spec /usr/local/bin/
 
       - name: Docstring coverage (mojo doc gate)
         run: |
-          net=$(python3 tools/dep_src.py mojo-net)
-          tls=$(python3 tools/dep_src.py mojo-tls)
           total=0
-          for f in src/hpack/*.mojo src/h2/*.mojo; do
-            n=$(pixi run mojo doc -I src -I "$net" -I "$tls" --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
+          for f in src/tls/*.mojo; do
+            n=$(pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null "$f" 2>&1 | grep -c warning || true)
             if [ "$n" != "0" ]; then echo "MISSING DOCS: $f ($n)"; total=$((total+n)); fi
           done
           test "$total" = "0"
 
-      - name: Unit tests
+      - name: Unit tests (builds the shim and cert corpus)
         run: pixi run test
 
-      - name: Benchmarks (smoke)
-        run: pixi run bench-smoke
-
-      - name: Compatibility suite (python-hpack, hyperframe, hyper-h2, h2spec)
+      - name: Compatibility suite (differential vs CPython ssl)
         run: pixi run compliance
 
       - name: Upload compatibility report

@@ -7,6 +7,7 @@ from std.testing import assert_equal, assert_true
 from h2 import Http2Connection
 from grpc import (
     GrpcChannel,
+    GrpcTransport,
     Metadata,
     Server,
     ServerCall,
@@ -62,7 +63,7 @@ def fail_stream_handler(
 struct TestRig(Movable):
     var channel: GrpcChannel
     var server: Server
-    var server_conn: Http2Connection[TCPStream]
+    var server_conn: Http2Connection[GrpcTransport]
     var handled: List[UInt32]
 
     def pump_server_until_reply(mut self) raises:
@@ -84,7 +85,8 @@ def make_rig() raises -> TestRig:
     var listener = TCPListener("127.0.0.1", 0)
     var channel = GrpcChannel.connect("127.0.0.1", listener.local_port)
     var server_tcp = listener.accept()
-    var server_conn = Http2Connection(server_tcp^, is_client=False)
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     return TestRig(
         channel=channel^,

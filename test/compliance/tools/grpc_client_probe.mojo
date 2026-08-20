@@ -44,7 +44,16 @@ def main() raises:
     var args = argv()
     var port = UInt16(Int(args[1]))
     var mode = args[2]
-    var channel = GrpcChannel.connect("127.0.0.1", port)
+    var channel: GrpcChannel
+    if len(args) >= 6 and args[len(args) - 3] == "tls":
+        channel = GrpcChannel.connect_tls(
+            "127.0.0.1",
+            port,
+            ca_file=args[len(args) - 2],
+            server_name=args[len(args) - 1],
+        )
+    else:
+        channel = GrpcChannel.connect("127.0.0.1", port)
 
     if mode == "status":
         var r = unary_text(
