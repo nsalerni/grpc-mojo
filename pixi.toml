@@ -5,6 +5,7 @@ name = "grpc-mojo"
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 version = "0.1.0"
 license = "Apache-2.0"
+preview = ["pixi-build"]
 
 [tasks]
 prepare-tls = "python3 tools/prepare_tls.py"
@@ -21,6 +22,7 @@ interop = { cmd = "python3 test/interop/run_interop.py", depends-on = ["prepare-
 compliance = { cmd = "python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
 interop-official = { cmd = "python3 test/interop/official/run_official.py", depends-on = ["prepare-tls"] }
 check-extraction = "python3 tools/check_extraction.py"
+package-test = "python3 packaging/test_installed_package.py"
 gen-conformance = "python3 -m grpc_tools.protoc -I$CONFORMANCE_SRC/conformance -I$CONFORMANCE_SRC/src --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/conformance/gen $CONFORMANCE_SRC/conformance/conformance.proto $CONFORMANCE_SRC/src/google/protobuf/test_messages_proto3.proto"
 
 [dependencies]
@@ -37,3 +39,10 @@ grpcio-status = ">=1.60"
 googleapis-common-protos = ">=1.60"
 h2 = ">=4.1"
 hyperframe = ">=6.0"
+
+[package]
+name = "grpc-mojo"
+version = "0.1.0"
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "0.*" }
