@@ -67,3 +67,25 @@ jobs:
           path: |
             docs/COMPLIANCE.md
             docs/COMPLIANCE.html
+
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.11
+        with:
+          pixi-version: latest
+          cache: true
+
+      - name: Fetch source dependencies
+        run: python3 tools/fetch_deps.py
+
+      - name: Build and test the installed package
+        run: python3 packaging/test_installed_package.py
