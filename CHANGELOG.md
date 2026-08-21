@@ -2,12 +2,16 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-08-20
+
 - Added verified gRPC over TLS for clients and servers through `mojo-tls`.
 - Require the `h2` ALPN token on every secure gRPC connection.
 - Expanded the official grpcio interop matrix to 48/48 cases across both
   roles and both h2c and TLS transports.
+- Added an installable compiled package with clean-prefix verification on
+  macOS and Linux.
 
-## 0.1.0 — 2026-08-19
+## 0.1.0 - 2026-08-19
 
 Initial release.
 
