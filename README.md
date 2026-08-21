@@ -121,7 +121,7 @@ tests every package against an established reference implementation —
 hyper-h2/hyperframe (which raises `ProtocolError` on any violation we emit),
 `net` vs CPython sockets, and `grpc` vs `grpcio` in both directions, and
 regenerates [docs/COMPLIANCE.md](docs/COMPLIANCE.md) with the results
-(currently **70/70 checks passing**). Each package repo also runs its own
+(currently **75/75 checks passing**). Each package repo also runs its own
 slice of the suite standalone. `test/interop/` holds the quicker
 grpcio-only interop smoke suite, and [docs/TESTING.md](docs/TESTING.md)
 maps out every verification layer (unit, differential, official suites,
