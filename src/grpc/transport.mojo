@@ -10,17 +10,24 @@
 
 """The byte-stream transport shared by h2c and TLS gRPC connections."""
 
-from net import IOStream, TCPStream
+from std.ffi import c_int
+
+from net import ReadinessStream, TCPStream
 from tls import TLSStream
 
 
 @fieldwise_init
-struct GrpcTransport(IOStream):
-    """An `IOStream` containing either a TCP stream or a TLS stream.
+struct GrpcTransport(ReadinessStream):
+    """A readiness-capable TCP or TLS stream for gRPC connections.
 
     This keeps `GrpcChannel`, `ServerCall`, and generated service types
     transport-stable while `Http2Connection` continues to operate through
-    its generic `IOStream` seam.
+    its generic stream seam. The wrapper owns exactly one concrete stream.
+
+    After a partial operation reports would-block, callers must retry that
+    same operation with the same unconsumed bytes. Plain TCP waits for the
+    operation's natural direction. TLS callers inspect `wants_read()` and
+    `wants_write()` because either operation can need either direction.
     """
 
     var _tcp: Optional[TCPStream]
@@ -53,6 +60,99 @@ struct GrpcTransport(IOStream):
         var out = GrpcTransport(_tcp=None, _tls=None)
         out._tls = stream^
         return out^
+
+    def descriptor(self) -> c_int:
+        """Returns the active stream's pollable descriptor.
+
+        Returns:
+            The descriptor owned by the wrapped TCP or TLS stream.
+        """
+        if self._tls:
+            return self._tls.value().descriptor()
+        return self._tcp.value().descriptor()
+
+    def set_nonblocking(mut self, enabled: Bool) raises:
+        """Switches the active stream's descriptor blocking mode.
+
+        Args:
+            enabled: True for non-blocking mode, False for blocking mode.
+
+        Raises:
+            If the descriptor flags cannot be updated.
+        """
+        if self._tls:
+            self._tls.value().set_nonblocking(enabled)
+            return
+        self._tcp.value().set_nonblocking(enabled)
+
+    def read(self, mut buf: List[Byte]) raises -> Int:
+        """Performs one partial read through the active stream.
+
+        Args:
+            buf: Pre-sized buffer to fill and shrink to bytes read.
+
+        Returns:
+            Bytes read, or zero on orderly EOF.
+
+        Raises:
+            The typed would-block error when no progress is possible, or
+            another transport error.
+        """
+        if self._tls:
+            return self._tls.value().read(buf)
+        return self._tcp.value().read(buf)
+
+    def write_some(self, data: Span[Byte, _]) raises -> Int:
+        """Performs one partial write through the active stream.
+
+        A would-block result accepts no bytes. Retry this operation with the
+        same span after the required readiness direction is reported.
+
+        Args:
+            data: Bytes to offer without an internal retry loop.
+
+        Returns:
+            Bytes accepted, or zero when the span is empty.
+
+        Raises:
+            The typed would-block error when no progress is possible, or
+            another transport error.
+        """
+        if self._tls:
+            return self._tls.value().write_some(data)
+        return self._tcp.value().write_some(data)
+
+    def wants_read(self) raises -> Bool:
+        """Reports TLS WANT_READ for the last blocked TLS operation.
+
+        Plain TCP operations use their natural direction, so this returns
+        False for h2c transports.
+
+        Returns:
+            True when the TLS operation must wait for readability.
+
+        Raises:
+            If the TLS readiness state cannot be queried.
+        """
+        if self._tls:
+            return self._tls.value().wants_read()
+        return False
+
+    def wants_write(self) raises -> Bool:
+        """Reports TLS WANT_WRITE for the last blocked TLS operation.
+
+        Plain TCP operations use their natural direction, so this returns
+        False for h2c transports.
+
+        Returns:
+            True when the TLS operation must wait for writability.
+
+        Raises:
+            If the TLS readiness state cannot be queried.
+        """
+        if self._tls:
+            return self._tls.value().wants_write()
+        return False
 
     def read_exact(self, n: Int) raises -> List[Byte]:
         """Reads exactly `n` bytes from the active stream.
