@@ -1,0 +1,259 @@
+{
+  "cases": [
+    "empty_unary",
+    "large_unary",
+    "client_streaming",
+    "server_streaming",
+    "ping_pong",
+    "empty_stream",
+    "custom_metadata",
+    "status_code_and_message",
+    "special_status_message",
+    "unimplemented_method",
+    "timeout_on_sleeping_server",
+    "cancel_after_begin"
+  ],
+  "results": [
+    {
+      "case": "empty_unary",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "empty_unary",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "empty_unary",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "empty_unary",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    }
+  ],
+  "schemaVersion": 1
+}

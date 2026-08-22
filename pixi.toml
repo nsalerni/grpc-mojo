@@ -20,7 +20,7 @@ gen-vectors = "python3 packages/protomojo/tools/gen_proto_vectors.py"
 gen-proto = "python3 -m grpc_tools.protoc -Ipackages/protomojo/test --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/test packages/protomojo/test/vectors.proto && python3 -m grpc_tools.protoc -Iexamples --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=examples examples/echo.proto && cp examples/echo_pb.mojo test/echo_pb.mojo"
 interop = { cmd = "python3 test/interop/run_interop.py", depends-on = ["prepare-tls"] }
 compliance = { cmd = "python3 tools/check_compliance_report.py && python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
-interop-official = { cmd = "python3 test/interop/official/run_official.py", depends-on = ["prepare-tls"] }
+interop-official = { cmd = "python3 -m unittest discover -s test/interop/official -p 'test_interop_results.py' && python3 test/interop/official/run_official.py", depends-on = ["prepare-tls"] }
 check-extraction = "python3 tools/check_extraction.py"
 package-test = "python3 packaging/test_installed_package.py"
 gen-conformance = "python3 -m grpc_tools.protoc -I$CONFORMANCE_SRC/conformance -I$CONFORMANCE_SRC/src --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/conformance/gen $CONFORMANCE_SRC/conformance/conformance.proto $CONFORMANCE_SRC/src/google/protobuf/test_messages_proto3.proto"

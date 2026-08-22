@@ -85,7 +85,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">75/75</span><span>checks passed</span><span class="when">2026-08-21 05:19 UTC</span></div>
+<div class="verdict"><span class="score">123/123</span><span>checks passed</span><span class="when">2026-08-22 16:19 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
@@ -95,6 +95,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <li>tls <span class="n">6/6</span></li>
 <li>grpc <span class="n">23/23</span></li>
 <li>grpc-tls <span class="n">3/3</span></li>
+<li>grpc-official <span class="n">48/48</span></li>
 <li>packaging <span class="n">6/6</span></li>
 <li>units <span class="n">2/2</span></li>
 <li>h2_tls <span class="n">4/4</span></li>
@@ -203,6 +204,60 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>Mojo TLS client: 64 KiB unary echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS client rejects a grpcio certificate hostname mismatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio TLS client: unary echo via Mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
+</table></div></section>
+<section>
+<h2><span class="pkg">Official gRPC interoperability</span> <span class="vs">vs</span> grpcio</h2>
+<p class="method">All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document.</p>
+<div class="tablewrap"><table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (h2c): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (TLS): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (h2c): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (TLS): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2>Extraction isolation</h2>

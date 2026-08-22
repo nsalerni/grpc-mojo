@@ -1,6 +1,7 @@
 # grpc-mojo 🔥
 
 [![CI](https://github.com/nsalerni/grpc-mojo/actions/workflows/ci.yml/badge.svg)](https://github.com/nsalerni/grpc-mojo/actions/workflows/ci.yml)
+[![Official gRPC interop](https://img.shields.io/endpoint?url=https%3A%2F%2Fnsalerni.github.io%2Fgrpc-mojo%2Fdocs%2Fofficial-interop-badge.json)](https://nsalerni.github.io/grpc-mojo/docs/COMPLIANCE.html)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Mojo 1.0](https://img.shields.io/badge/mojo-1.0-orange.svg)](https://www.modular.com/mojo)
 
@@ -18,8 +19,8 @@ imports, proto3 `optional` presence, and unknown-field preservation.
 Correctness is defined by reference implementations and official suites,
 not our own tests:
 
-- **Official gRPC interop cases**: 12 canonical cases × both directions
-  × h2c and TLS vs `grpcio`: 48/48 (`pixi run interop-official`)
+- **Official gRPC interop cases**: 12 canonical cases in both directions,
+  over h2c and TLS against `grpcio` (`pixi run interop-official`)
 - **h2spec** (RFC 9113/7541 conformance tool): all 146 checks pass
 - **Google protobuf conformance suite**: 698/698 binary wire-format
   tests pass (JSON/proto2/editions declared unsupported, skipped)
