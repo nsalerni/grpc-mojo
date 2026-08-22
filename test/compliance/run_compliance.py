@@ -1231,7 +1231,7 @@ def section_grpc_polling_tls(tmp: Path):
                     except OSError:
                         closed = True
                     return selected != "h2" and closed
-            except ssl.SSLError:
+            except (ssl.SSLError, ConnectionResetError):
                 return True
 
         no_overlap = rejected_alpn(["http/1.1"])
