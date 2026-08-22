@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-08-22
+
 - Added an opt-in `PollingServer` for bounded concurrent unary h2c or TLS
   connection I/O over kqueue and epoll. TLS handshakes are non-blocking,
   strictly require `h2` ALPN, and have explicit admission, work, and time
