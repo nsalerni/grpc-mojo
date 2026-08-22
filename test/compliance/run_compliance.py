@@ -22,6 +22,7 @@ Writes docs/COMPLIANCE.md and exits non-zero on any failure.
 
 import base64
 import json
+import multiprocessing
 import platform
 import re
 import socket
@@ -32,6 +33,7 @@ import tempfile
 import threading
 import time
 from concurrent import futures
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -313,6 +315,203 @@ def make_grpcio_probe_server(pb, use_tls: bool = False):
     return server, port
 
 
+def _polling_process_worker(args):
+    """Run one independent grpcio channel for the process-load proof."""
+    port, worker, calls = args
+    import grpc
+    import echo_pb2 as pb
+
+    with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+        echo = channel.unary_unary(
+            "/probe.Probe/Echo",
+            request_serializer=pb.EchoRequest.SerializeToString,
+            response_deserializer=pb.EchoResponse.FromString,
+        )
+        for call in range(calls):
+            value = f"worker={worker} call={call} " + "x" * 1000
+            response = echo(pb.EchoRequest(message=value), timeout=20)
+            if response.message != value:
+                return False
+    return True
+
+
+def _start_polling_server(*limits):
+    proc = subprocess.Popen(
+        [
+            *MOJO_RUN,
+            str(TOOLS / "grpc_polling_server_probe.mojo"),
+            *map(str, limits),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
+    )
+    line = proc.stdout.readline()
+    if "listening on" not in line:
+        stderr = proc.stderr.read(300)
+        proc.kill()
+        proc.wait()
+        raise RuntimeError(f"PollingServer did not start: {line!r} {stderr!r}")
+    return proc, int(line.strip().rsplit(":", 1)[-1])
+
+
+def _grpc_frame(payload: bytes, compressed: int = 0) -> bytes:
+    return bytes([compressed]) + len(payload).to_bytes(4, "big") + payload
+
+
+class _RawH2GrpcClient:
+    """Small hyper-h2 oracle for malformed and half-close cases."""
+
+    def __init__(self, port, *, receive_window=65535, receive_buffer=None):
+        import h2.config
+        import h2.connection
+
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        if receive_buffer is not None:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer)
+        self.sock.settimeout(10)
+        self.conn = h2.connection.H2Connection(
+            config=h2.config.H2Configuration(client_side=True)
+        )
+        self.conn.local_settings.initial_window_size = receive_window
+        self.conn.initiate_connection()
+        if receive_window > 65535:
+            self.conn.increment_flow_control_window(receive_window - 65535)
+        self.sock.sendall(self.conn.data_to_send())
+        self.write_closed = False
+
+    def close(self):
+        self.sock.close()
+
+    def start_request(
+        self,
+        path,
+        body=None,
+        *,
+        method="POST",
+        content_type="application/grpc",
+        end_stream=True,
+        extra_headers=(),
+    ):
+        sid = self.conn.get_next_available_stream_id()
+        headers = [
+            (":method", method),
+            (":scheme", "http"),
+            (":authority", "127.0.0.1"),
+            (":path", path),
+            ("te", "trailers"),
+            ("content-type", content_type),
+            *extra_headers,
+        ]
+        self.conn.send_headers(sid, headers, end_stream=body is None and end_stream)
+        if body is not None:
+            self.conn.send_data(sid, body, end_stream=end_stream)
+        self.sock.sendall(self.conn.data_to_send())
+        return sid
+
+    def finish(self, sid, timeout=10):
+        import h2.events
+
+        deadline = time.monotonic() + timeout
+        headers = []
+        trailers = []
+        body = bytearray()
+        resets = []
+        while time.monotonic() < deadline:
+            self.sock.settimeout(max(0.05, deadline - time.monotonic()))
+            data = self.sock.recv(65536)
+            if not data:
+                break
+            events = self.conn.receive_data(data)
+            for event in events:
+                if isinstance(event, h2.events.ResponseReceived) and event.stream_id == sid:
+                    headers.extend(event.headers)
+                elif isinstance(event, h2.events.TrailersReceived) and event.stream_id == sid:
+                    trailers.extend(event.headers)
+                elif isinstance(event, h2.events.DataReceived) and event.stream_id == sid:
+                    body.extend(event.data)
+                    self.conn.acknowledge_received_data(
+                        event.flow_controlled_length, event.stream_id
+                    )
+                elif isinstance(event, h2.events.StreamReset):
+                    resets.append((event.stream_id, event.error_code))
+                elif isinstance(event, h2.events.StreamEnded) and event.stream_id == sid:
+                    pending = self.conn.data_to_send()
+                    if pending and not self.write_closed:
+                        self.sock.sendall(pending)
+                    return {
+                        "headers": dict(headers),
+                        "trailers": dict(trailers),
+                        "body": bytes(body),
+                        "resets": resets,
+                    }
+            pending = self.conn.data_to_send()
+            if pending and not self.write_closed:
+                self.sock.sendall(pending)
+        raise TimeoutError(f"stream {sid} did not finish")
+
+    def request(self, path, body, **kwargs):
+        sid = self.start_request(path, body, **kwargs)
+        return sid, self.finish(sid)
+
+    def expect_reset(self, sid, code, timeout=5):
+        from hyperframe.frame import Frame, RstStreamFrame
+
+        deadline = time.monotonic() + timeout
+        buffered = bytearray()
+        while time.monotonic() < deadline:
+            self.sock.settimeout(max(0.05, deadline - time.monotonic()))
+            data = self.sock.recv(65536)
+            if not data:
+                return False
+            buffered.extend(data)
+            found = False
+            offset = 0
+            while len(buffered) - offset >= 9:
+                frame, length = Frame.parse_frame_header(
+                    memoryview(buffered)[offset : offset + 9]
+                )
+                if len(buffered) - offset < 9 + length:
+                    break
+                frame.parse_body(
+                    memoryview(buffered)[offset + 9 : offset + 9 + length]
+                )
+                if (
+                    isinstance(frame, RstStreamFrame)
+                    and frame.stream_id == sid
+                    and frame.error_code == code
+                ):
+                    found = True
+                offset += 9 + length
+            if offset:
+                del buffered[:offset]
+            self.conn.receive_data(data)
+            pending = self.conn.data_to_send()
+            if pending:
+                self.sock.sendall(pending)
+            if found:
+                return True
+        return False
+
+
+def _grpc_status(result):
+    value = result["trailers"].get(b"grpc-status")
+    if value is None:
+        value = result["headers"].get(b"grpc-status")
+    return None if value is None else int(value)
+
+
+def _decode_echo_response(pb, result):
+    body = result["body"]
+    if len(body) < 5 or body[0] != 0:
+        raise ValueError(f"invalid gRPC response frame: {body[:16]!r}")
+    size = int.from_bytes(body[1:5], "big")
+    if len(body) != size + 5:
+        raise ValueError(f"invalid gRPC response length: {len(body)} != {size + 5}")
+    return pb.EchoResponse.FromString(body[5:])
+
+
 def section_grpc_client(tmp: Path):
     print("== grpc: mojo client vs grpcio server ==")
     import echo_pb2 as pb
@@ -466,6 +665,424 @@ def section_grpc_server(tmp: Path):
         proc.kill(); proc.wait()
 
 
+def section_grpc_polling_server(tmp: Path):
+    """Judge the bounded unary h2c event loop with grpcio and hyper-h2."""
+    print("== grpc polling server with grpcio and hyper-h2 peers ==")
+    import grpc
+    import echo_pb2 as pb
+
+    proc, port = _start_polling_server(128, 4 * 1024 * 1024, 64 * 1024, 64)
+    try:
+        stalled = socket.create_connection(("127.0.0.1", port), timeout=5)
+        stalled.sendall(b"PRI * HTTP/2.0\r\n")
+        try:
+            work = [(port, worker, 25) for worker in range(16)]
+            with ProcessPoolExecutor(
+                max_workers=16, mp_context=multiprocessing.get_context("spawn")
+            ) as pool:
+                outcomes = list(pool.map(_polling_process_worker, work))
+            record(
+                "grpc-polling",
+                "16 grpcio processes complete 25 unary calls each while a partial preface stalls",
+                outcomes == [True] * 16,
+                f"passed={sum(outcomes)}/16 calls={16 * 25}",
+            )
+        finally:
+            stalled.close()
+
+        with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+            echo = channel.unary_unary(
+                "/probe.Probe/Echo",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            large = "z" * 1_000_000
+            response = echo(pb.EchoRequest(message=large), timeout=30)
+            record(
+                "grpc-polling",
+                "1 MiB grpcio unary response completes with a 64 KiB configured output limit",
+                response.message == large,
+                f"response={len(response.message)} bytes bound=65536",
+            )
+
+            empty = echo(pb.EchoRequest(message=""), timeout=10)
+            metadata = channel.unary_unary(
+                "/probe.Probe/Metadata",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            meta_response, meta_call = metadata.with_call(
+                pb.EchoRequest(message="metadata"), timeout=10
+            )
+            initial = dict(meta_call.initial_metadata())
+            trailing = dict(meta_call.trailing_metadata())
+            fail = channel.unary_unary(
+                "/probe.Probe/Fail",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            unknown = False
+            try:
+                fail(pb.EchoRequest(message="fail"), timeout=10)
+            except grpc.RpcError as error:
+                unknown = error.code() == grpc.StatusCode.UNKNOWN
+            supported_ok = (
+                empty.message == ""
+                and meta_response.message == "metadata"
+                and initial.get("x-polling-initial") == "ready"
+                and trailing.get("x-polling-trailer") == "done"
+                and unknown
+            )
+            record(
+                "grpc-polling",
+                "grpcio observes empty unary, metadata, trailers, and handler UNKNOWN",
+                supported_ok,
+                f"initial={initial} trailing={trailing} unknown={unknown}",
+            )
+
+        stalled_output = _RawH2GrpcClient(
+            port, receive_window=4 * 1024 * 1024, receive_buffer=1024
+        )
+        try:
+            stalled_output.start_request(
+                "/probe.Probe/Large",
+                _grpc_frame(pb.EchoRequest(message="large").SerializeToString()),
+                extra_headers=(("grpc-timeout", "100m"),),
+            )
+            time.sleep(0.3)
+            started = time.monotonic()
+            with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+                echo = channel.unary_unary(
+                    "/probe.Probe/Echo",
+                    request_serializer=pb.EchoRequest.SerializeToString,
+                    response_deserializer=pb.EchoResponse.FromString,
+                )
+                response = echo(
+                    pb.EchoRequest(message="not stalled"), timeout=10
+                )
+            elapsed = time.monotonic() - started
+            stalled_ok = response.message == "not stalled" and elapsed < 2.0
+        finally:
+            stalled_output.close()
+        record(
+            "grpc-polling",
+            "an expired large response with a stalled reader does not spin the loop",
+            stalled_ok,
+            f"healthy_elapsed={elapsed:.3f}s",
+        )
+
+        raw = _RawH2GrpcClient(port)
+        try:
+            split_ok = True
+            for split in range(1, 5):
+                message = f"split-{split}"
+                framed = _grpc_frame(
+                    pb.EchoRequest(message=message).SerializeToString()
+                )
+                sid = raw.start_request(
+                    "/probe.Probe/Echo", None, end_stream=False
+                )
+                raw.conn.send_data(sid, framed[:split], end_stream=False)
+                raw.conn.send_data(sid, framed[split:], end_stream=True)
+                raw.sock.sendall(raw.conn.data_to_send())
+                result = raw.finish(sid)
+                split_ok &= (
+                    _grpc_status(result) == 0
+                    and _decode_echo_response(pb, result).message == message
+                )
+            record(
+                "grpc-polling",
+                "all four internal gRPC prefix split boundaries complete",
+                split_ok,
+                "boundaries=1,2,3,4",
+            )
+
+            invalid_cases = [
+                ("compressed", _grpc_frame(b"x", compressed=1), 13),
+                ("multiple", _grpc_frame(b"a") + _grpc_frame(b"b"), 13),
+                ("truncated", b"\x00\x00\x00\x00\x03x", 13),
+            ]
+            invalid_ok = True
+            details = []
+            for name, body, expected in invalid_cases:
+                _, result = raw.request("/probe.Probe/Fail", body)
+                status = _grpc_status(result)
+                invalid_ok &= status == expected
+                _, healthy = raw.request(
+                    "/probe.Probe/Echo",
+                    _grpc_frame(pb.EchoRequest(message=name).SerializeToString()),
+                )
+                response = _decode_echo_response(pb, healthy)
+                invalid_ok &= _grpc_status(healthy) == 0 and response.message == name
+                details.append(f"{name}={status}")
+            record(
+                "grpc-polling",
+                "wire grammar rejects compressed, multiple, and truncated unary input",
+                invalid_ok,
+                " ".join(details),
+            )
+
+            _, get_result = raw.request(
+                "/probe.Probe/Fail", _grpc_frame(b""), method="GET"
+            )
+            _, type_result = raw.request(
+                "/probe.Probe/Fail",
+                _grpc_frame(b""),
+                content_type="application/grpcx",
+            )
+            _, empty_subtype = raw.request(
+                "/probe.Probe/Fail",
+                _grpc_frame(b""),
+                content_type="application/grpc+",
+            )
+            _, missing_result = raw.request(
+                "/probe.Probe/Missing", _grpc_frame(b"")
+            )
+            strict_ok = (
+                _grpc_status(get_result) == 13
+                and type_result["headers"].get(b":status") == b"415"
+                and empty_subtype["headers"].get(b":status") == b"415"
+                and _grpc_status(missing_result) == 12
+            )
+            record(
+                "grpc-polling",
+                "protocol grammar enforces POST, content type, and registered routes",
+                strict_ok,
+                f"GET={_grpc_status(get_result)} "
+                f"content-type={type_result['headers'].get(b':status')} "
+                f"empty-subtype={empty_subtype['headers'].get(b':status')} "
+                f"missing={_grpc_status(missing_result)}",
+            )
+
+        finally:
+            raw.close()
+
+        deadline = _RawH2GrpcClient(port)
+        try:
+            sid = deadline.conn.get_next_available_stream_id()
+            deadline.conn.send_headers(
+                sid,
+                [
+                    (":method", "POST"),
+                    (":scheme", "http"),
+                    (":authority", "127.0.0.1"),
+                    (":path", "/probe.Probe/Fail"),
+                    ("te", "trailers"),
+                    ("content-type", "application/grpc"),
+                    ("grpc-timeout", "100m"),
+                ],
+                end_stream=False,
+            )
+            deadline.sock.sendall(deadline.conn.data_to_send())
+            started = time.monotonic()
+            result = deadline.finish(sid, timeout=5)
+            elapsed = time.monotonic() - started
+            record(
+                "grpc-polling",
+                "idle grpc-timeout wakes the poller before invoking the handler",
+                _grpc_status(result) == 4 and 0.05 <= elapsed < 2.0,
+                f"status={_grpc_status(result)} elapsed={elapsed:.3f}s",
+            )
+        finally:
+            deadline.close()
+
+        complete = _RawH2GrpcClient(port)
+        try:
+            sid = complete.start_request(
+                "/probe.Probe/Echo",
+                _grpc_frame(pb.EchoRequest(message="final").SerializeToString()),
+            )
+            complete.sock.shutdown(socket.SHUT_WR)
+            complete.write_closed = True
+            result = complete.finish(sid)
+            final_ok = (
+                _grpc_status(result) == 0
+                and _decode_echo_response(pb, result).message == "final"
+            )
+        finally:
+            complete.close()
+
+        truncated = _RawH2GrpcClient(port)
+        try:
+            sid = truncated.start_request(
+                "/probe.Probe/Fail", b"\x00\x00\x00\x00\x03x"
+            )
+            truncated.sock.shutdown(socket.SHUT_WR)
+            truncated.write_closed = True
+            result = truncated.finish(sid)
+            truncated_ok = _grpc_status(result) == 13
+        finally:
+            truncated.close()
+        record(
+            "grpc-polling",
+            "readable final bytes beat FIN and truncated FIN skips the handler",
+            final_ok and truncated_ok,
+            f"complete={final_ok} truncated={truncated_ok}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+
+    proc, port = _start_polling_server(
+        4, 4 * 1024 * 1024, 1024, 64, 300, 300
+    )
+    try:
+        partial = socket.create_connection(("127.0.0.1", port), timeout=5)
+        partial.sendall(b"PRI * HTTP/2.0\r\n")
+        magic = socket.create_connection(("127.0.0.1", port), timeout=5)
+        magic.sendall(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        preface = _RawH2GrpcClient(port)
+        unfinished = _RawH2GrpcClient(port)
+        unfinished.start_request(
+            "/probe.Probe/Fail", None, end_stream=False
+        )
+
+        def pending_call():
+            with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+                echo = channel.unary_unary(
+                    "/probe.Probe/Echo",
+                    request_serializer=pb.EchoRequest.SerializeToString,
+                    response_deserializer=pb.EchoResponse.FromString,
+                )
+                return echo(pb.EchoRequest(message="recovered"), timeout=10).message
+
+        with futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(pending_call)
+            time.sleep(0.1)
+            paused = not future.done()
+            recovered = future.result(timeout=10) == "recovered"
+        partial.close()
+        magic.close()
+        preface.close()
+        unfinished.close()
+        error_response = False
+        with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+            missing = channel.unary_unary(
+                "/probe.Probe/Missing",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            try:
+                missing(pb.EchoRequest(message="missing"), timeout=10)
+            except grpc.RpcError as error:
+                error_response = error.code() == grpc.StatusCode.UNIMPLEMENTED
+        record(
+            "grpc-polling",
+            "idle and incomplete peers leave a full cap, and 1 KiB emits both statuses",
+            paused and recovered and error_response,
+            f"paused={paused} recovered={recovered} error={error_response}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+
+    proc, port = _start_polling_server(8, 32, 64 * 1024, 1)
+    try:
+        raw = _RawH2GrpcClient(port)
+        try:
+            declared = b"x" * 33
+            _, rejected = raw.request(
+                "/probe.Probe/Fail", _grpc_frame(declared)
+            )
+            _, healthy = raw.request(
+                "/probe.Probe/Echo",
+                _grpc_frame(pb.EchoRequest(message="ok").SerializeToString()),
+            )
+            response = _decode_echo_response(pb, healthy)
+            bounded_ok = (
+                _grpc_status(rejected) == 8
+                and _grpc_status(healthy) == 0
+                and response.message == "ok"
+            )
+
+            retired_sid = raw.conn.get_next_available_stream_id()
+            raw.conn.send_headers(
+                retired_sid,
+                [
+                    (":method", "POST"),
+                    (":scheme", "http"),
+                    (":authority", "127.0.0.1"),
+                    (":path", "/probe.Probe/Echo"),
+                    ("te", "trailers"),
+                    ("content-type", "application/grpc"),
+                ],
+            )
+            raw.conn.send_data(
+                retired_sid,
+                _grpc_frame(pb.EchoRequest(message="retire").SerializeToString()),
+                end_stream=True,
+            )
+            raw.sock.sendall(raw.conn.data_to_send())
+            retired_result = raw.finish(retired_sid)
+
+            from hyperframe.frame import DataFrame
+            old = DataFrame(retired_sid)
+            old.data = b"late"
+            raw.sock.sendall(old.serialize())
+            reset_old = raw.expect_reset(retired_sid, 5)
+            later_sid = raw.start_request(
+                "/probe.Probe/Echo",
+                _grpc_frame(pb.EchoRequest(message="later").SerializeToString()),
+            )
+            later = raw.finish(later_sid)
+            later_response = _decode_echo_response(pb, later)
+            retired_ok = (
+                _grpc_status(retired_result) == 0
+                and reset_old
+                and _grpc_status(later) == 0
+                and later_response.message == "later"
+            )
+
+        finally:
+            raw.close()
+
+        concurrent = _RawH2GrpcClient(port)
+        try:
+            # Send both streams before reading the server SETTINGS that
+            # advertises the one-active-stream limit. The server must still
+            # enforce that limit on the wire.
+            first_sid = concurrent.start_request(
+                "/probe.Probe/Echo", None, end_stream=False
+            )
+            refused_sid = concurrent.start_request(
+                "/probe.Probe/Echo",
+                _grpc_frame(pb.EchoRequest(message="refused").SerializeToString()),
+            )
+            refused = concurrent.expect_reset(refused_sid, 7)
+            concurrent.conn.send_data(
+                first_sid,
+                _grpc_frame(pb.EchoRequest(message="first").SerializeToString()),
+                end_stream=True,
+            )
+            concurrent.sock.sendall(concurrent.conn.data_to_send())
+            first = concurrent.finish(first_sid)
+            _, next_result = concurrent.request(
+                "/probe.Probe/Echo",
+                _grpc_frame(pb.EchoRequest(message="next").SerializeToString()),
+            )
+            concurrent_ok = (
+                refused
+                and _grpc_status(first) == 0
+                and _decode_echo_response(pb, first).message == "first"
+                and _grpc_status(next_result) == 0
+                and _decode_echo_response(pb, next_result).message == "next"
+            )
+        finally:
+            concurrent.close()
+        record(
+            "grpc-polling",
+            "oversized input recovers with one-frame turns and retired ids stay closed",
+            bounded_ok and retired_ok and concurrent_ok,
+            f"bounded={bounded_ok} retired={retired_ok} "
+            f"concurrent={concurrent_ok} "
+            f"first={_grpc_status(retired_result)} resets={later['resets']} "
+            f"later={_grpc_status(later)} body={later_response.message!r}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def section_grpc_tls(tmp: Path):
     print("== grpc TLS: grpc-mojo vs grpcio ==")
     import grpc
@@ -605,7 +1222,7 @@ def section_order() -> list[str]:
     """Canonical report order, plus any unexpected sections at the end."""
     known = [
         "proto", "hpack", "h2", "net", "tls", "grpc", "grpc-tls",
-        "grpc-transport", "grpc-official", "packaging", "units",
+        "grpc-transport", "grpc-polling", "grpc-official", "packaging", "units",
     ]
     return known + [s for s in RESULTS if s not in known]
 
@@ -627,6 +1244,8 @@ SECTION_TITLES = {
                  "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo."),
     "grpc-transport": ("`GrpcTransport` vs CPython sockets and ssl",
                        "The readiness wrapper transfers a large payload through CPython TCP and TLS peers with partial reads, partial writes, and would-block handling. TLS retries preserve the direction reported by OpenSSL across same-operation retries."),
+    "grpc-polling": ("`PollingServer` with grpcio and hyper-h2 external peers",
+                     "Independent grpcio processes exercise supported unary behavior, while hyper-h2 drives edge cases and stricter policy grounded in the gRPC HTTP/2 wire grammar. The checks cover configured output limits, fairness, deadlines, rejected-request isolation, connection-cap recovery, half-close ordering, and retired stream ids."),
     "grpc-official": ("Official gRPC interoperability vs grpcio",
                       "All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document."),
     "packaging": ("Extraction isolation",
@@ -795,7 +1414,7 @@ def write_html_report():
     gaps = [
 
         ("Compression", "grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
-        ("Concurrency", "connections served sequentially and bidi is receive-driven until Mojo exposes threads/async (PRIMITIVES.md #7)."),
+        ("Concurrency", "PollingServer overlaps bounded unary h2c connection I/O; handlers remain serialized. TLS and streaming RPCs use the blocking server (PRIMITIVES.md #7)."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
     ]
     for k, v in gaps:
@@ -853,7 +1472,7 @@ def write_report():
         "",
 
         "- **Compression**: `grpc-encoding` negotiation plumbing exists; codecs need a zlib binding (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
-        "- **Concurrency**: connections served sequentially until Mojo exposes threads/async (PRIMITIVES.md item 7).",
+        "- **Concurrency**: `PollingServer` overlaps bounded unary h2c connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). TLS and streaming RPCs remain on the blocking server.",
         "",
     ]
     REPORT.write_text("\n".join(lines))
@@ -873,6 +1492,7 @@ def main() -> int:
         section_grpc_transport()
         section_grpc_client(tmp)
         section_grpc_server(tmp)
+        section_grpc_polling_server(tmp)
         section_grpc_tls(tmp)
     section_units()
     section_official_interop()

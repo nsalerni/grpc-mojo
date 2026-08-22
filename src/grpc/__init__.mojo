@@ -77,6 +77,7 @@ from .metadata import (
     is_binary_key,
     is_valid_metadata_key,
 )
+from .polling_server import PollingServer, PollingServerConfig
 from .server import (
     MethodKind,
     RawHandler,
