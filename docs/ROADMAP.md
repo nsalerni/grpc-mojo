@@ -138,7 +138,7 @@ carrying its extracted test subset.
 | **mojo-hpack** | `src/hpack` | none — RFC-complete today | Any HTTP/2 work needs it |
 | **mojo-net** | `src/net` | DNS (`getaddrinfo`), IPv6, UDP, timeouts (A2.1) | Ends per-project libc socket bindings (lightbug et al.) |
 | **mojo-h2** | `src/h2` | A3 guards, B3 clean | HTTP/2 for Mojo servers/clients generally |
-| **mojo-zlib** | new | thin FFI to system zlib | Unblocks gRPC gzip; general compression |
+| **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | integrate its zlib bindings with grpc-mojo | Enables pending gRPC gzip support; general compression |
 | **mojo-threads** | new | RFC first (see D4) | pthread_create/mutex/condvar via `abi("C")` trampolines; unblocks concurrent serving |
 | **mojo-tls** | `packages/mojo-tls` | shipped with strict X.509, SNI, and ALPN in both roles | TLS for the whole ecosystem |
 
@@ -171,7 +171,7 @@ Ordered by leverage-per-effort:
    design thread; a kqueue/epoll `mojo-reactor` prototype as evidence for
    the async I/O discussion. Align with Modular's coroutine plans rather
    than forking; `std.runtime._asyncrt` is explicitly unstable.
-5. **`std.compress` proposal** *(S)* — once mojo-zlib exists.
+5. **`std.compress` proposal** *(S)*: informed by mojo-zlib integration.
 6. **Developer-experience feedback** *(S)* — write up what building a
    protocol stack on day-one Mojo 1.0 surfaced: `mojo test` removal and
    the executable-tests pattern, comptime-`Array` materialization
@@ -186,7 +186,7 @@ Ordered by leverage-per-effort:
 |---|---|---|---|
 | **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · bug report / PRs / extraction pending |
 | **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming · ✅ deadlines/cancel · ✅ interop 48/48 across h2c and TLS · ✅ h2spec 146/146 · flood guards pending |
-| **3 — Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish · D3 std.net RFC · C mojo-zlib + gRPC compression · A4 codegen imports/presence · B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts) · ✅ A4 (imports, optional, unknown fields) · ✅ conformance 698/698 · zlib + RFC pending |
+| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields); ✅ conformance 698/698; mojo-zlib available; gzip integration + RFC pending |
 | **4. Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | TLS interop ✅ · bounded unary h2c polling ✅ · parallel handlers pending |
 
 **Definition of "100% compatible", concretely:** official gRPC interop

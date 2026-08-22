@@ -269,5 +269,5 @@ The repo's unit tests are themselves reference-anchored: protobuf goldens genera
 
 ## Known gaps (tracked, not silent)
 
-- **Compression**: `grpc-encoding` negotiation plumbing exists; codecs need a zlib binding (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.
+- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.
 - **Concurrency**: `PollingServer` overlaps bounded unary h2c connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). TLS and streaming RPCs remain on the blocking server.
