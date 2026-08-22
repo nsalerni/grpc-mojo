@@ -85,14 +85,14 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">123/123</span><span>checks passed</span><span class="when">2026-08-22 16:19 UTC</span></div>
+<div class="verdict"><span class="score">138/138</span><span>checks passed</span><span class="when">2026-08-22 17:03 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
 <li>hpack <span class="n">5/5</span></li>
-<li>h2 <span class="n">11/11</span></li>
-<li>net <span class="n">9/9</span></li>
-<li>tls <span class="n">6/6</span></li>
+<li>h2 <span class="n">20/20</span></li>
+<li>net <span class="n">11/11</span></li>
+<li>tls <span class="n">10/10</span></li>
 <li>grpc <span class="n">23/23</span></li>
 <li>grpc-tls <span class="n">3/3</span></li>
 <li>grpc-official <span class="n">48/48</span></li>
@@ -135,6 +135,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>coalesced input preserves 7 hyperframe frames</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>seeded fragmentation of a 16 KiB hyperframe DATA frame</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>incomplete hyperframe suffix is retained without early output</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>connection startup accepts hyper-h2 bytes at every split point (76 plans)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>one-byte startup feeds preserve all 75 hyper-h2 bytes</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>process_frame reassembles hyper-h2 header blocks across one or more CONTINUATION frames</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>process_frame preserves HPACK dynamic state across streams</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>process_frame queues SETTINGS and PING acknowledgements matching hyper-h2</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>process_frame matches hyper-h2 rejection of illegal CONTINUATION sequences</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>queued HEADERS and flow-controlled DATA are accepted by hyper-h2</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>hyperframe decodes client startup with SETTINGS_ENABLE_PUSH=0</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>hyperframe-built ENABLE_PUSH frames obey endpoint role rules</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo client vs hyper-h2 server (200KB echo, strict validation)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo client reassembles HEADERS+CONTINUATION (32KB header block) and padded DATA</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>hyper-h2 client vs mojo server (50KB echo, strict validation)</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -152,8 +161,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>mojo IPv6 TCP client 100KB roundtrip vs python ::1 server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo unix-socket server echoes 1MiB to CPython AF_UNIX client</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo unix-socket client 1MiB roundtrip vs CPython server</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>one Poller event loop echoes to 20 concurrent CPython clients</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>one Poller event loop drains and echoes a burst of 20 CPython clients</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Poller readiness sequence matches CPython selectors</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ReadinessStream TCP partial I/O matches CPython sockets</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ReadinessStream Unix partial I/O matches CPython AF_UNIX</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">tls</span> <span class="vs">vs</span> CPython ssl</h2>
@@ -166,6 +177,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>both reject an untrusted (self-signed) certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>both reject a hostname mismatch on a CA-signed certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>ALPN no overlap: our server alerts fatally, our client tolerates a server that proceeds without</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>resumable Mojo handshake matches CPython TLS and ALPN</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>partial Mojo TLS writes match CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>partial Mojo TLS reads preserve WANT_READ against CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS write preserves WANT_WRITE under CPython backpressure</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc</span> <span class="vs">vs</span> grpcio</h2>
@@ -276,7 +291,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <p class="method">The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td>unit test files (22/22 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>unit test files (25/25 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>interop suite (interop: 7 passed, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>

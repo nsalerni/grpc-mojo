@@ -109,6 +109,8 @@ def main() raises:
     var st = listener.accept()
     var client = Http2Connection(ct^, is_client=True)
     var server = Http2Connection(st^, is_client=False)
+    # Client startup is queued until the transport caller flushes it.
+    client.flush_output()
     server.process_next_frame()
     client.process_next_frame()
     client.close()
