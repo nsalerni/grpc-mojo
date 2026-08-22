@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-08-22
+
+- Published a generated official interoperability report and badge backed by
+  48/48 grpcio cases across both roles and transports.
+- Aligned source and installed-package checks with mojo-net v0.2.2,
+  mojo-tls v0.2.1, and mojo-http2 v0.2.2.
+- Kept isolated package extraction verification compatible with queued
+  HTTP/2 client startup.
+
 ## 0.2.0 - 2026-08-20
 
 - Added verified gRPC over TLS for clients and servers through `mojo-tls`.
