@@ -39,15 +39,14 @@ read/write timeouts with a typed timeout error. **Publish-ready.**
 `TaskGroup`, but there is no public event loop, no async sockets, no
 timers-as-futures. Everything async-adjacent is `_`-prefixed/private.
 
-**What we built (v0)**: nothing — we use blocking I/O and OS threads via the
-runtime, with the transport isolated behind interfaces.
+**What we built**: `mojo-net` provides a `Poller` over kqueue and epoll plus
+non-blocking readiness streams. `grpc-mojo` uses it in the unary h2c
+`PollingServer`, while the full server remains blocking.
 
-**Plan**: a standalone `mojo-reactor` package: kqueue (macOS) / epoll (Linux)
-readiness loop with a poll-based API first (usable without any async-runtime
-integration), then `async fn read()/write()` adapters once Modular stabilizes
-the coroutine ABI. This should *not* go into stdlib until Modular's own async
-design lands — track the forum's async discussions and align, don't fork the
-ecosystem.
+**Plan**: keep the poll-based API usable without an async runtime, then add
+`async fn read()/write()` adapters once Modular stabilizes the coroutine ABI.
+This should not go into stdlib until Modular's own async design lands. Track
+the forum's async discussions and align with that work.
 
 ## 3. TLS — **standalone package**
 
@@ -99,9 +98,10 @@ private post-1.0 (`std.runtime._asyncrt`, explicitly unstable), there is no
 cannot serve connections concurrently without one of: threads, a public task
 API, or an event loop (item 2).
 
-**What we did**: v0 serves connections sequentially and documents it. The
-`Server` dispatch is factored (`dispatch_ready`) so a concurrency layer wraps
-it without rewriting the protocol logic. `pthread_create` via FFI with
+**What we did**: the full `Server` keeps sequential blocking connections for
+TLS and all four RPC kinds. The separate unary h2c `PollingServer` uses the
+mojo-net reactor to overlap bounded connection I/O on one thread, while
+handler calls remain serialized. `pthread_create` via FFI with
 `abi("C")` callbacks is feasible today and is the pragmatic next step for a
 community `mojo-threads` package — but thread-safety guarantees around Mojo's
 ownership model need Modular's input before publishing one. Raise this in the
