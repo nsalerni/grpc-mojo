@@ -16,10 +16,14 @@ import time
 from concurrent import futures
 from pathlib import Path
 
+from interop_results import badge_payload, result_document, stable_json
+
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 BUILD = ROOT / "build"
 HERE = Path(__file__).resolve().parent
 CERTS = BUILD / "certs"
+RESULT_REPORT = ROOT / "docs" / "official-interop-results.json"
+BADGE_REPORT = ROOT / "docs" / "official-interop-badge.json"
 MOJO_RUN = [
     "mojo", "run",
     "-I", "packages/mojo-net/src",
@@ -387,8 +391,13 @@ def main() -> int:
     run_direction_a(True)
     run_direction_b(False)
     run_direction_b(True)
+    document = result_document(CASES, RESULTS)
+    RESULT_REPORT.write_text(stable_json(document))
+    BADGE_REPORT.write_text(stable_json(badge_payload(document)))
     print(f"\nofficial interop: {PASS} passed, {FAIL} failed "
           f"({len(CASES)} cases x 2 directions x 2 transports)")
+    print(f"report: {RESULT_REPORT.relative_to(ROOT)}")
+    print(f"report: {BADGE_REPORT.relative_to(ROOT)}")
     return 1 if FAIL else 0
 
 

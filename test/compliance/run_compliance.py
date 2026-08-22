@@ -37,6 +37,7 @@ BUILD = ROOT / "build"
 TOOLS = ROOT / "test" / "compliance" / "tools"
 REPORT = ROOT / "docs" / "COMPLIANCE.md"
 HTML_REPORT = ROOT / "docs" / "COMPLIANCE.html"
+OFFICIAL_RESULTS_REPORT = ROOT / "docs" / "official-interop-results.json"
 CERTS = BUILD / "certs"
 MOJO_RUN = [
     "mojo", "run",
@@ -52,6 +53,9 @@ RESULTS: dict[str, list[tuple[str, bool, str]]] = {}
 
 # Package suites executed and aggregated by this umbrella (in report order).
 PACKAGE_SUITES = ("protomojo", "mojo-http2", "mojo-net", "mojo-tls")
+
+sys.path.insert(0, str(ROOT / "test" / "interop" / "official"))
+from interop_results import evaluated_results  # noqa: E402
 
 
 def record(section: str, name: str, ok: bool, detail: str = ""):
@@ -439,6 +443,27 @@ def section_units():
            r.stdout[-300:] if not ok else "")
 
 
+def section_official_interop():
+    """Load the canonical outcomes emitted by the official interop runner."""
+    print("== official gRPC interoperability results ==")
+    try:
+        document = json.loads(OFFICIAL_RESULTS_REPORT.read_text())
+        rows, problems = evaluated_results(document)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        record("grpc-official", "official interop result source", False, str(exc))
+        return
+
+    for row in rows:
+        record(
+            "grpc-official",
+            f"{row['label']} ({row['transport']}): {row['case']}",
+            bool(row["passed"]),
+            str(row["detail"]),
+        )
+    for problem in problems:
+        record("grpc-official", "official interop result source", False, problem)
+
+
 # --------------------------------------------------------------- report ---
 
 def versions() -> dict[str, str]:
@@ -460,7 +485,7 @@ def section_order() -> list[str]:
     """Canonical report order, plus any unexpected sections at the end."""
     known = [
         "proto", "hpack", "h2", "net", "tls", "grpc", "grpc-tls",
-        "packaging", "units",
+        "grpc-official", "packaging", "units",
     ]
     return known + [s for s in RESULTS if s not in known]
 
@@ -480,6 +505,8 @@ SECTION_TITLES = {
              "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
     "grpc-tls": ("`grpc` over TLS vs grpcio",
                  "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo."),
+    "grpc-official": ("Official gRPC interoperability vs grpcio",
+                      "All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document."),
     "packaging": ("Extraction isolation",
                   "Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check. This is the mechanical proof behind independent open-sourcing."),
     "units": ("Spec-vector unit suites",
@@ -725,6 +752,7 @@ def main() -> int:
         section_grpc_server(tmp)
         section_grpc_tls(tmp)
     section_units()
+    section_official_interop()
     return 0 if write_report() else 1
 
 

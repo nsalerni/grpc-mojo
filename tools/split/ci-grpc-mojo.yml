@@ -53,11 +53,16 @@ jobs:
       - name: Benchmarks (smoke)
         run: pixi run bench-smoke
 
-      - name: Compliance suite (differential vs reference implementations)
-        run: pixi run compliance
-
       - name: Official gRPC interop cases (both directions vs grpcio)
         run: pixi run interop-official
+
+      - name: Verify published interop results are current
+        run: |
+          git diff --exit-code -- docs/official-interop-results.json
+          git diff --exit-code -- docs/official-interop-badge.json
+
+      - name: Compliance suite (differential vs reference implementations)
+        run: pixi run compliance
 
       - name: Upload compliance report
         if: always()
@@ -67,3 +72,5 @@ jobs:
           path: |
             docs/COMPLIANCE.md
             docs/COMPLIANCE.html
+            docs/official-interop-results.json
+            docs/official-interop-badge.json
