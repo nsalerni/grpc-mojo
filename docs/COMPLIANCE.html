@@ -85,18 +85,19 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">152/152</span><span>checks passed</span><span class="when">2026-08-22 20:28 UTC</span></div>
+<div class="verdict"><span class="score">159/159</span><span>checks passed</span><span class="when">2026-08-22 22:55 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
-<li>tls <span class="n">10/10</span></li>
+<li>tls <span class="n">12/12</span></li>
 <li>grpc <span class="n">23/23</span></li>
 <li>grpc-tls <span class="n">3/3</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
 <li>grpc-polling <span class="n">11/11</span></li>
+<li>grpc-polling-tls <span class="n">5/5</span></li>
 <li>grpc-official <span class="n">48/48</span></li>
 <li>packaging <span class="n">6/6</span></li>
 <li>units <span class="n">2/2</span></li>
@@ -184,6 +185,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>partial Mojo TLS writes match CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>partial Mojo TLS reads preserve WANT_READ against CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS write preserves WANT_WRITE under CPython backpressure</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>fatal session teardown does not contaminate the next nonblocking TLS session</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>reset peers with rejected ALPN do not terminate the server</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc</span> <span class="vs">vs</span> grpcio</h2>
@@ -247,6 +250,17 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>readable final bytes beat FIN and truncated FIN skips the handler</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>idle and incomplete peers leave a full cap, and 1 KiB emits both statuses</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>oversized input recovers with one-frame turns and retired ids stay closed</td><td class="result"><span class="pass">PASS</span></td></tr>
+</table></div></section>
+<section>
+<h2>PollingServer TLS with grpcio and CPython ssl peers</h2>
+<p class="method">Independent grpcio processes and CPython ssl exercise non-blocking TLS handshakes, strict h2 ALPN, certificate verification, handshake-cap recovery, large responses, and output backpressure.</p>
+<div class="tablewrap"><table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>8 grpcio TLS processes and a 1 MiB unary call complete beside a stalled handshake</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>idle TLS grpc-timeout writes a deadline response without more peer input</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>TLS output backpressure does not spin or starve a healthy grpcio call</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>ALPN, hostname, and trust failures are isolated from later TLS RPCs</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>absolute handshake timeout frees a full connection cap without attacker closes</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">Official gRPC interoperability</span> <span class="vs">vs</span> grpcio</h2>
@@ -345,7 +359,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>
 <li><strong>Compression</strong>: mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded.</li>
-<li><strong>Concurrency</strong>: PollingServer overlaps bounded unary h2c connection I/O; handlers remain serialized. TLS and streaming RPCs use the blocking server (PRIMITIVES.md #7).</li>
+<li><strong>Concurrency</strong>: PollingServer overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized. Streaming RPCs use the blocking server (PRIMITIVES.md #7).</li>
 <li><strong>hpack value encoding</strong>: header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
 </ul></section>
 <footer>Generated by test/compliance/run_compliance.py &middot; rerun with <code>pixi run compliance</code> &middot; canonical copy: docs/COMPLIANCE.md</footer>

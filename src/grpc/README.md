@@ -17,11 +17,12 @@ TLS clients use `GrpcChannel.connect_tls`; TLS servers use `Server.tls`.
 Both require the `h2` ALPN token, and clients verify the certificate chain
 and hostname by default.
 
-`PollingServer` is a separate opt-in server for unary h2c services. It uses
-`mojo-net` readiness polling to progress bounded I/O across many connections
-on one thread. Its connection, accept, inactivity, incomplete-request, read,
-frame, write, message, and output limits are explicit. Handlers execute
-serially, and TLS and streaming methods remain on `Server`.
+`PollingServer` is a separate opt-in server for unary h2c or TLS services. It
+uses `mojo-net` readiness polling to progress bounded I/O and TLS handshakes
+across many connections on one thread. Its connection, handshake, accept,
+inactivity, incomplete-request, read, frame, write, message, and output limits
+are explicit. TLS requires the `h2` ALPN token. Handlers execute serially, and
+streaming methods remain on `Server`.
 
 Verification: the 12 canonical gRPC interop cases pass in both directions
 over h2c and TLS against `grpcio` (`pixi run interop-official`), plus

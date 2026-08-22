@@ -19,7 +19,7 @@ TEST_TIMEOUT_SECONDS = 5 * 60
 DEPENDENCIES = [
     ("mojo-net", "0.2.2", PACKAGES / "mojo-net"),
     ("protomojo", "0.2.0", PACKAGES / "protomojo"),
-    ("mojo-tls", "0.2.1", PACKAGES / "mojo-tls"),
+    ("mojo-tls", "0.2.3", PACKAGES / "mojo-tls"),
     ("mojo-http2", "0.2.4", PACKAGES / "mojo-http2"),
 ]
 

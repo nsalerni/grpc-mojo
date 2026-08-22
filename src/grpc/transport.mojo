@@ -71,6 +71,9 @@ struct GrpcTransport(ReadinessStream):
             return self._tls.value().descriptor()
         return self._tcp.value().descriptor()
 
+    def _is_secure(self) -> Bool:
+        return Bool(self._tls)
+
     def set_nonblocking(mut self, enabled: Bool) raises:
         """Switches the active stream's descriptor blocking mode.
 

@@ -104,7 +104,7 @@ descriptor semantics.
 * Client: unary and streaming calls over one HTTP/2 connection.
 * Server: service registry keyed by `/package.Service/Method` path, unary and
   streaming handlers, Trailers-Only for immediate errors, 415 for non-gRPC
-  content types. `PollingServer` is a separate unary h2c path that uses only
+  content types. `PollingServer` is a separate unary h2c or TLS path that uses
   queue-based HTTP/2 operations and readiness-driven partial socket I/O.
 * Transport: h2c over `TCPStream`, or verified TLS over `TLSStream` with the
   `h2` ALPN token required in both roles.
@@ -113,17 +113,20 @@ descriptor semantics.
 
 Mojo 1.0 has `async fn` and an internal `TaskGroup` runtime, but no public,
 stable async I/O story. The full `Server` therefore retains its blocking,
-sequential connection model for all four RPC kinds and TLS. The opt-in unary
-h2c `PollingServer` uses kqueue or epoll to make bounded progress across many
-connections on one thread. Its handler calls are still serialized, so a slow
-handler stalls the event loop. `GrpcTransport` keeps transport mechanics below
-the gRPC protocol layer in both models.
+sequential connection model for all four RPC kinds. The opt-in unary
+`PollingServer` uses kqueue or epoll to make bounded progress across many h2c
+or TLS connections on one thread. Its handler calls are still serialized, so
+a slow handler stalls the event loop. `GrpcTransport` keeps transport
+mechanics below the gRPC protocol layer in both models.
 
-`PollingServerConfig` bounds connections, accepts, inactivity, incomplete
-requests, socket bytes, dispatched HTTP/2 frames, message bytes, and unsent
-wire bytes. One connection retains at most `max_message_size + 5` response
-bytes and `max_pending_output_size` wire bytes. Across the server, those bounds
-scale linearly with `max_connections`.
+`PollingServerConfig` bounds connections, accepted and pending TLS handshakes,
+handshake work and time, inactivity, incomplete requests, socket bytes,
+dispatched HTTP/2 frames, message bytes, and unsent wire bytes. One established
+connection retains at most `max_message_size + 5` response bytes and
+`max_pending_output_size` wire bytes. Across the server, those bounds scale
+linearly with `max_connections`. OpenSSL's per-handshake and per-session
+allocations sit outside the plaintext message and wire-output byte limits, so
+pending handshakes have their own admission cap.
 
 ## Testing strategy
 
