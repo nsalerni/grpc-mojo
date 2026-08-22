@@ -344,7 +344,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>platform</td><td>Darwin 27.0.0 arm64</td></tr>
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>
-<li><strong>Compression</strong>: grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded.</li>
+<li><strong>Compression</strong>: mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded.</li>
 <li><strong>Concurrency</strong>: PollingServer overlaps bounded unary h2c connection I/O; handlers remain serialized. TLS and streaming RPCs use the blocking server (PRIMITIVES.md #7).</li>
 <li><strong>hpack value encoding</strong>: header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
 </ul></section>

@@ -1413,7 +1413,7 @@ def write_html_report():
     h.append('<section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>')
     gaps = [
 
-        ("Compression", "grpc-encoding negotiation plumbing exists; codecs need a zlib binding (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
+        ("Compression", "mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
         ("Concurrency", "PollingServer overlaps bounded unary h2c connection I/O; handlers remain serialized. TLS and streaming RPCs use the blocking server (PRIMITIVES.md #7)."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
     ]
@@ -1471,7 +1471,7 @@ def write_report():
         "## Known gaps (tracked, not silent)",
         "",
 
-        "- **Compression**: `grpc-encoding` negotiation plumbing exists; codecs need a zlib binding (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
+        "- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
         "- **Concurrency**: `PollingServer` overlaps bounded unary h2c connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). TLS and streaming RPCs remain on the blocking server.",
         "",
     ]

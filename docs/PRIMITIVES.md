@@ -58,14 +58,15 @@ for verified HTTP/2 and gRPC connections, and require the `h2` ALPN token.
 **Verification**: CPython `ssl`, h2spec TLS mode, and grpcio all exercise the
 implementation across client and server roles in CI.
 
-## 4. Compression codecs (gzip/deflate) — **stdlib candidate**
+## 4. Compression codecs (gzip/deflate): **integration pending**
 
-**Gap**: no zlib/deflate in stdlib. gRPC's `grpc-encoding: gzip` needs it.
+**Available package**:
+[`mojo-zlib`](https://github.com/gabrieldemarmiesse/mojo-zlib) provides Mojo
+bindings to zlib. Mojo's stdlib still has no zlib/deflate API.
 
-**Plan**: thin `external_call` binding to system zlib (present on macOS and
-virtually every Linux) as `mojo-zlib`; propose `std.compress` upstream. The
-grpc-mojo message framing already carries the compressed flag and
-`grpc-accept-encoding` negotiation, so the codec plugs into one interface.
+**Remaining work**: integrate a gzip codec with grpc-mojo's existing compressed
+flag and `grpc-accept-encoding` negotiation, then verify it against grpcio. Use
+that integration experience to inform a `std.compress` proposal upstream.
 
 ## 5. Big-endian byte order helpers — **small stdlib PR**
 
@@ -114,7 +115,7 @@ stdlib forum alongside the async RFC.
 | 5 | BE/LE int↔bytes | modular/modular PR | S | now |
 | 6 | base64 variants | modular/modular PR | S | now |
 | 1 | `std.net` sockets | RFC thread + community package → stdlib PR | M | after v0 ships |
-| 4 | zlib binding | community package → `std.compress` proposal | M | with grpc compression |
+| 4 | gzip integration | existing `mojo-zlib` package, then `std.compress` proposal | M | next |
 | 2 | reactor | community package (`mojo-reactor`) | L | after Modular async stabilizes |
 | 7 | threads | forum RFC + `mojo-threads` package | M | next: unblocks concurrent server |
 | 3 | TLS | community package (`mojo-tls`) | complete | shipped |

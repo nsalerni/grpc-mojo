@@ -50,10 +50,12 @@ Each future standalone repo lives as a self-contained subfolder under
 | `protomojo` | [`packages/protomojo`](packages/protomojo) | Protobuf wire format + runtime + protoc plugin | stdlib |
 | `grpc-mojo` | [`src/grpc`](src/grpc) | gRPC calls, status, metadata, client, server | all of the above |
 
-Each package is standalone-extractable by design — Mojo 1.0 is missing several
-primitives gRPC needs (sockets, async I/O, TLS, zlib), and the plan for
-contributing those back to [modular/modular](https://github.com/modular/modular)
-or as community packages is in [docs/PRIMITIVES.md](docs/PRIMITIVES.md).
+Each package is standalone-extractable by design. Mojo 1.0 is missing several
+stdlib primitives used by this stack. The community
+[`mojo-zlib`](https://github.com/gabrieldemarmiesse/mojo-zlib) package now
+provides zlib bindings, while grpc-mojo's `grpc-encoding: gzip` integration is
+still pending. The upstream and integration plan is in
+[docs/PRIMITIVES.md](docs/PRIMITIVES.md).
 Architecture details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The
 sequenced plan for closing the remaining gaps and shipping the community
 packages: [docs/ROADMAP.md](docs/ROADMAP.md).

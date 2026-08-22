@@ -137,6 +137,6 @@ scale linearly with `max_connections`.
 
 ## Out of scope for v0 (tracked in PRIMITIVES.md and issues)
 
-Compression codecs (gzip needs zlib bindings; the flag/negotiation plumbing
-is implemented), retries/service
+Compression codecs (mojo-zlib exists, but gzip integration with the existing
+flag/negotiation plumbing is pending), retries/service
 config, load balancing, channelz/reflection/health services.
