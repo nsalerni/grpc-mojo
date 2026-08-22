@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Made `GrpcTransport` implement `ReadinessStream` for pollable partial TCP
+  and TLS I/O, including exact TLS retry direction.
+
 ## 0.2.1 - 2026-08-22
 
 - Published a generated official interoperability report and badge backed by

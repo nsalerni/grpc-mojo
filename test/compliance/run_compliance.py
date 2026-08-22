@@ -24,9 +24,12 @@ import base64
 import json
 import platform
 import re
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent import futures
 from datetime import datetime, timezone
@@ -131,6 +134,123 @@ def section_packaging(tmp: Path):
 
 
 # ----------------------------------------------------------------- grpc ---
+
+def section_grpc_transport():
+    """Check the wrapper's partial I/O against CPython TCP and TLS peers."""
+    print("== grpc transport readiness vs CPython ==")
+    size = 8 * 1024 * 1024
+
+    def peer(listener, result, context=None):
+        conn = None
+        try:
+            raw, _ = listener.accept()
+            conn = (
+                context.wrap_socket(raw, server_side=True)
+                if context is not None
+                else raw
+            )
+            conn.settimeout(30)
+            if context is not None:
+                result["version"] = conn.version()
+                result["alpn"] = conn.selected_alpn_protocol()
+            time.sleep(0.2)
+            conn.sendall(b"R")
+            time.sleep(0.3)
+            received = bytearray()
+            while len(received) < size:
+                chunk = conn.recv(min(65536, size - len(received)))
+                if not chunk:
+                    break
+                received.extend(chunk)
+            result["bytes"] = len(received)
+            result["payload_ok"] = received == b"\x5a" * size
+            conn.sendall(received)
+        except Exception as error:
+            result["error"] = repr(error)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def run_case(mode, context=None):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        result = {}
+        thread = threading.Thread(
+            target=peer, args=(listener, result, context), daemon=True
+        )
+        thread.start()
+        args = [mode, listener.getsockname()[1], size]
+        if mode == "tls":
+            args.append(CERTS / "ca.pem")
+        proc = run_tool(
+            "grpc_transport_readiness_probe", *args, timeout=120
+        )
+        thread.join(timeout=35)
+        peer_alive = thread.is_alive()
+        listener.close()
+        values = None
+        parts = proc.stdout.split()
+        if proc.returncode == 0 and len(parts) == 11 and parts[0] == "OK":
+            try:
+                values = tuple(map(int, parts[1:]))
+            except ValueError:
+                pass
+        return values, result, proc, peer_alive
+
+    values, peer_result, proc, peer_alive = run_case("tcp")
+    tcp_ok = (
+        values is not None
+        and values[0] == size
+        and values[1] == size
+        and values[2] > 1
+        and values[3] > 1
+        and values[4] > 0
+        and values[5] > 0
+        and values[6:] == (0, 0, 0, 0)
+        and peer_result.get("bytes") == size
+        and peer_result.get("payload_ok") is True
+        and "error" not in peer_result
+        and not peer_alive
+    )
+    record(
+        "grpc-transport",
+        "h2c partial I/O and would-block match CPython sockets",
+        tcp_ok,
+        f"out={proc.stdout.strip()!r} peer={peer_result} "
+        f"peer_alive={peer_alive} err={proc.stderr[:160]!r}",
+    )
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(CERTS / "server.pem", CERTS / "server.key")
+    context.set_alpn_protocols(["h2"])
+    values, peer_result, proc, peer_alive = run_case("tls", context)
+    tls_ok = (
+        values is not None
+        and values[0] == size
+        and values[1] == size
+        and values[2] > 1
+        and values[3] > 1
+        and values[4] > 0
+        and values[5] > 0
+        and values[6] + values[7] == values[4]
+        and values[8] + values[9] == values[5]
+        and peer_result.get("bytes") == size
+        and peer_result.get("payload_ok") is True
+        and str(peer_result.get("version", "")).startswith("TLSv1.")
+        and peer_result.get("alpn") == "h2"
+        and "error" not in peer_result
+        and not peer_alive
+    )
+    record(
+        "grpc-transport",
+        "TLS partial I/O preserves OpenSSL-reported retry direction",
+        tls_ok,
+        f"out={proc.stdout.strip()!r} peer={peer_result} "
+        f"peer_alive={peer_alive} err={proc.stderr[:160]!r}",
+    )
+
 
 def make_grpcio_probe_server(pb, use_tls: bool = False):
     import grpc
@@ -485,7 +605,7 @@ def section_order() -> list[str]:
     """Canonical report order, plus any unexpected sections at the end."""
     known = [
         "proto", "hpack", "h2", "net", "tls", "grpc", "grpc-tls",
-        "grpc-official", "packaging", "units",
+        "grpc-transport", "grpc-official", "packaging", "units",
     ]
     return known + [s for s in RESULTS if s not in known]
 
@@ -505,6 +625,8 @@ SECTION_TITLES = {
              "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
     "grpc-tls": ("`grpc` over TLS vs grpcio",
                  "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo."),
+    "grpc-transport": ("`GrpcTransport` vs CPython sockets and ssl",
+                       "The readiness wrapper transfers a large payload through CPython TCP and TLS peers with partial reads, partial writes, and would-block handling. TLS retries preserve the direction reported by OpenSSL across same-operation retries."),
     "grpc-official": ("Official gRPC interoperability vs grpcio",
                       "All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document."),
     "packaging": ("Extraction isolation",
@@ -748,6 +870,7 @@ def main() -> int:
         run_package_suites(tmp)
         compile_test_protos(tmp)
         section_packaging(tmp)
+        section_grpc_transport()
         section_grpc_client(tmp)
         section_grpc_server(tmp)
         section_grpc_tls(tmp)
