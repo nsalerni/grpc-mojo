@@ -30,6 +30,9 @@ jobs:
       - name: Install h2spec
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
+            if brew untrust --tap | grep -Fxq "  aws/tap"; then
+              brew untap aws/tap
+            fi
             brew install h2spec
           else
             curl -sL https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz | tar xz
