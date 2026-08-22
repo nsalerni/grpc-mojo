@@ -85,12 +85,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">140/140</span><span>checks passed</span><span class="when">2026-08-22 18:11 UTC</span></div>
+<div class="verdict"><span class="score">141/141</span><span>checks passed</span><span class="when">2026-08-22 18:45 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
 <li>hpack <span class="n">5/5</span></li>
-<li>h2 <span class="n">20/20</span></li>
+<li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
 <li>tls <span class="n">10/10</span></li>
 <li>grpc <span class="n">23/23</span></li>
@@ -138,8 +138,9 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>incomplete hyperframe suffix is retained without early output</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>connection startup accepts hyper-h2 bytes at every split point (76 plans)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>one-byte startup feeds preserve all 75 hyper-h2 bytes</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>one-frame dispatch budget preserves hyperframe wire order and hyper-h2 output</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>process_frame reassembles hyper-h2 header blocks across one or more CONTINUATION frames</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>process_frame preserves HPACK dynamic state across streams</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>process_frame preserves HPACK state and bounds live state across 4096 retired hyper-h2 streams</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>process_frame queues SETTINGS and PING acknowledgements matching hyper-h2</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>process_frame matches hyper-h2 rejection of illegal CONTINUATION sequences</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>queued HEADERS and flow-controlled DATA are accepted by hyper-h2</td><td class="result"><span class="pass">PASS</span></td></tr>
