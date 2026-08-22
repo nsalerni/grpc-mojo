@@ -317,11 +317,18 @@ def make_grpcio_probe_server(pb, use_tls: bool = False):
 
 def _polling_process_worker(args):
     """Run one independent grpcio channel for the process-load proof."""
-    port, worker, calls = args
+    port, worker, calls, use_tls = args
     import grpc
     import echo_pb2 as pb
 
-    with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+    if use_tls:
+        credentials = grpc.ssl_channel_credentials(
+            root_certificates=(CERTS / "ca.pem").read_bytes()
+        )
+        channel = grpc.secure_channel(f"localhost:{port}", credentials)
+    else:
+        channel = grpc.insecure_channel(f"127.0.0.1:{port}")
+    with channel:
         echo = channel.unary_unary(
             "/probe.Probe/Echo",
             request_serializer=pb.EchoRequest.SerializeToString,
@@ -329,19 +336,27 @@ def _polling_process_worker(args):
         )
         for call in range(calls):
             value = f"worker={worker} call={call} " + "x" * 1000
-            response = echo(pb.EchoRequest(message=value), timeout=20)
+            try:
+                response = echo(pb.EchoRequest(message=value), timeout=20)
+            except grpc.RpcError:
+                return False
             if response.message != value:
                 return False
     return True
 
 
-def _start_polling_server(*limits):
+def _start_polling_server(*limits, use_tls=False):
+    command = [
+        *MOJO_RUN,
+        str(TOOLS / "grpc_polling_server_probe.mojo"),
+        *map(str, limits),
+    ]
+    if use_tls:
+        command.extend(
+            ["tls", str(CERTS / "server.pem"), str(CERTS / "server.key")]
+        )
     proc = subprocess.Popen(
-        [
-            *MOJO_RUN,
-            str(TOOLS / "grpc_polling_server_probe.mojo"),
-            *map(str, limits),
-        ],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -363,11 +378,28 @@ def _grpc_frame(payload: bytes, compressed: int = 0) -> bytes:
 class _RawH2GrpcClient:
     """Small hyper-h2 oracle for malformed and half-close cases."""
 
-    def __init__(self, port, *, receive_window=65535, receive_buffer=None):
+    def __init__(
+        self,
+        port,
+        *,
+        receive_window=65535,
+        receive_buffer=None,
+        use_tls=False,
+    ):
         import h2.config
         import h2.connection
 
-        self.sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+        if use_tls:
+            context = ssl.create_default_context(cafile=CERTS / "ca.pem")
+            context.set_alpn_protocols(["h2"])
+            sock = context.wrap_socket(sock, server_hostname="localhost")
+            if sock.selected_alpn_protocol() != "h2":
+                sock.close()
+                raise RuntimeError("PollingServer TLS did not negotiate h2")
+        self.sock = sock
+        self.scheme = "https" if use_tls else "http"
+        self.authority = "localhost" if use_tls else "127.0.0.1"
         if receive_buffer is not None:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer)
         self.sock.settimeout(10)
@@ -397,8 +429,8 @@ class _RawH2GrpcClient:
         sid = self.conn.get_next_available_stream_id()
         headers = [
             (":method", method),
-            (":scheme", "http"),
-            (":authority", "127.0.0.1"),
+            (":scheme", self.scheme),
+            (":authority", self.authority),
             (":path", path),
             ("te", "trailers"),
             ("content-type", content_type),
@@ -676,7 +708,7 @@ def section_grpc_polling_server(tmp: Path):
         stalled = socket.create_connection(("127.0.0.1", port), timeout=5)
         stalled.sendall(b"PRI * HTTP/2.0\r\n")
         try:
-            work = [(port, worker, 25) for worker in range(16)]
+            work = [(port, worker, 25, False) for worker in range(16)]
             with ProcessPoolExecutor(
                 max_workers=16, mp_context=multiprocessing.get_context("spawn")
             ) as pool:
@@ -1083,6 +1115,204 @@ def section_grpc_polling_server(tmp: Path):
         proc.wait()
 
 
+def _polling_secure_channel(grpc, port):
+    credentials = grpc.ssl_channel_credentials(
+        root_certificates=(CERTS / "ca.pem").read_bytes()
+    )
+    return grpc.secure_channel(f"localhost:{port}", credentials)
+
+
+def _polling_echo_method(grpc, pb, channel):
+    return channel.unary_unary(
+        "/probe.Probe/Echo",
+        request_serializer=pb.EchoRequest.SerializeToString,
+        response_deserializer=pb.EchoResponse.FromString,
+    )
+
+
+def section_grpc_polling_tls(tmp: Path):
+    """Judge PollingServer TLS with grpcio and CPython ssl peers."""
+    print("== grpc polling server TLS with grpcio and CPython ssl peers ==")
+    import grpc
+    import echo_pb2 as pb
+
+    limits = (128, 4 * 1024 * 1024, 64 * 1024, 64, 300_000, 30_000, 10_000)
+    proc, port = _start_polling_server(*limits, use_tls=True)
+    try:
+        stalled_handshake = socket.create_connection(("127.0.0.1", port), timeout=5)
+        stalled_handshake.sendall(b"\x16\x03\x01\x00")
+        try:
+            work = [(port, worker, 10, True) for worker in range(8)]
+            with ProcessPoolExecutor(
+                max_workers=8, mp_context=multiprocessing.get_context("spawn")
+            ) as pool:
+                outcomes = list(pool.map(_polling_process_worker, work))
+            with _polling_secure_channel(grpc, port) as channel:
+                echo = _polling_echo_method(grpc, pb, channel)
+                large = "t" * 1_000_000
+                response = echo(pb.EchoRequest(message=large), timeout=30)
+            record(
+                "grpc-polling-tls",
+                "8 grpcio TLS processes and a 1 MiB unary call complete beside a stalled handshake",
+                outcomes == [True] * 8 and response.message == large,
+                f"workers={sum(outcomes)}/8 response={len(response.message)} bytes",
+            )
+        finally:
+            stalled_handshake.close()
+
+        deadline = _RawH2GrpcClient(port, use_tls=True)
+        try:
+            sid = deadline.conn.get_next_available_stream_id()
+            deadline.conn.send_headers(
+                sid,
+                [
+                    (":method", "POST"),
+                    (":scheme", "https"),
+                    (":authority", "localhost"),
+                    (":path", "/probe.Probe/Fail"),
+                    ("te", "trailers"),
+                    ("content-type", "application/grpc"),
+                    ("grpc-timeout", "100m"),
+                ],
+                end_stream=False,
+            )
+            deadline.sock.sendall(deadline.conn.data_to_send())
+            started = time.monotonic()
+            result = deadline.finish(sid, timeout=5)
+            elapsed = time.monotonic() - started
+        finally:
+            deadline.close()
+        record(
+            "grpc-polling-tls",
+            "idle TLS grpc-timeout writes a deadline response without more peer input",
+            _grpc_status(result) == 4 and 0.05 <= elapsed < 2.0,
+            f"status={_grpc_status(result)} elapsed={elapsed:.3f}s",
+        )
+
+        stalled_output = _RawH2GrpcClient(
+            port,
+            receive_window=4 * 1024 * 1024,
+            receive_buffer=1024,
+            use_tls=True,
+        )
+        try:
+            stalled_output.start_request(
+                "/probe.Probe/Large",
+                _grpc_frame(pb.EchoRequest(message="large").SerializeToString()),
+                extra_headers=(("grpc-timeout", "100m"),),
+            )
+            time.sleep(0.3)
+            started = time.monotonic()
+            with _polling_secure_channel(grpc, port) as channel:
+                echo = _polling_echo_method(grpc, pb, channel)
+                response = echo(pb.EchoRequest(message="healthy"), timeout=10)
+            elapsed = time.monotonic() - started
+            backpressure_ok = response.message == "healthy" and elapsed < 2.0
+        finally:
+            stalled_output.close()
+        record(
+            "grpc-polling-tls",
+            "TLS output backpressure does not spin or starve a healthy grpcio call",
+            backpressure_ok,
+            f"healthy_elapsed={elapsed:.3f}s",
+        )
+
+        def rejected_alpn(protocols):
+            context = ssl.create_default_context(cafile=CERTS / "ca.pem")
+            if protocols is not None:
+                context.set_alpn_protocols(protocols)
+            try:
+                raw = socket.create_connection(("127.0.0.1", port), timeout=5)
+                with context.wrap_socket(raw, server_hostname="localhost") as peer:
+                    peer.settimeout(2)
+                    selected = peer.selected_alpn_protocol()
+                    try:
+                        closed = peer.recv(1) == b""
+                    except OSError:
+                        closed = True
+                    return selected != "h2" and closed
+            except ssl.SSLError:
+                return True
+
+        no_overlap = rejected_alpn(["http/1.1"])
+        no_alpn = rejected_alpn(None)
+
+        wrong_hostname = False
+        credentials = grpc.ssl_channel_credentials(
+            root_certificates=(CERTS / "ca.pem").read_bytes()
+        )
+        with grpc.secure_channel(
+            f"localhost:{port}",
+            credentials,
+            options=(("grpc.ssl_target_name_override", "wrong.example"),),
+        ) as channel:
+            echo = _polling_echo_method(grpc, pb, channel)
+            try:
+                echo(pb.EchoRequest(message="wrong-host"), timeout=3)
+            except grpc.RpcError:
+                wrong_hostname = True
+
+        wrong_ca = False
+        with grpc.secure_channel(
+            f"localhost:{port}", grpc.ssl_channel_credentials()
+        ) as channel:
+            echo = _polling_echo_method(grpc, pb, channel)
+            try:
+                echo(pb.EchoRequest(message="wrong-ca"), timeout=3)
+            except grpc.RpcError:
+                wrong_ca = True
+
+        with _polling_secure_channel(grpc, port) as channel:
+            echo = _polling_echo_method(grpc, pb, channel)
+            recovered = echo(
+                pb.EchoRequest(message="recovered"), timeout=10
+            ).message == "recovered"
+        record(
+            "grpc-polling-tls",
+            "ALPN, hostname, and trust failures are isolated from later TLS RPCs",
+            no_overlap and no_alpn and wrong_hostname and wrong_ca and recovered,
+            f"no_overlap={no_overlap} no_alpn={no_alpn} "
+            f"wrong_hostname={wrong_hostname} wrong_ca={wrong_ca} "
+            f"recovered={recovered}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+
+    timeout_limits = (
+        4,
+        4 * 1024 * 1024,
+        64 * 1024,
+        64,
+        300_000,
+        30_000,
+        300,
+    )
+    proc, port = _start_polling_server(*timeout_limits, use_tls=True)
+    attackers = []
+    try:
+        attackers = [
+            socket.create_connection(("127.0.0.1", port), timeout=5)
+            for _ in range(4)
+        ]
+        started = time.monotonic()
+        with _polling_secure_channel(grpc, port) as channel:
+            echo = _polling_echo_method(grpc, pb, channel)
+            response = echo(pb.EchoRequest(message="timeout"), timeout=5)
+        elapsed = time.monotonic() - started
+        record(
+            "grpc-polling-tls",
+            "absolute handshake timeout frees a full connection cap without attacker closes",
+            response.message == "timeout" and 0.2 <= elapsed < 3.0,
+            f"elapsed={elapsed:.3f}s response={response.message!r}",
+        )
+    finally:
+        for attacker in attackers:
+            attacker.close()
+        proc.kill()
+        proc.wait()
+
+
 def section_grpc_tls(tmp: Path):
     print("== grpc TLS: grpc-mojo vs grpcio ==")
     import grpc
@@ -1222,7 +1452,8 @@ def section_order() -> list[str]:
     """Canonical report order, plus any unexpected sections at the end."""
     known = [
         "proto", "hpack", "h2", "net", "tls", "grpc", "grpc-tls",
-        "grpc-transport", "grpc-polling", "grpc-official", "packaging", "units",
+        "grpc-transport", "grpc-polling", "grpc-polling-tls",
+        "grpc-official", "packaging", "units",
     ]
     return known + [s for s in RESULTS if s not in known]
 
@@ -1246,6 +1477,8 @@ SECTION_TITLES = {
                        "The readiness wrapper transfers a large payload through CPython TCP and TLS peers with partial reads, partial writes, and would-block handling. TLS retries preserve the direction reported by OpenSSL across same-operation retries."),
     "grpc-polling": ("`PollingServer` with grpcio and hyper-h2 external peers",
                      "Independent grpcio processes exercise supported unary behavior, while hyper-h2 drives edge cases and stricter policy grounded in the gRPC HTTP/2 wire grammar. The checks cover configured output limits, fairness, deadlines, rejected-request isolation, connection-cap recovery, half-close ordering, and retired stream ids."),
+    "grpc-polling-tls": ("`PollingServer` TLS with grpcio and CPython ssl peers",
+                         "Independent grpcio processes and CPython ssl exercise non-blocking TLS handshakes, strict h2 ALPN, certificate verification, handshake-cap recovery, large responses, and output backpressure."),
     "grpc-official": ("Official gRPC interoperability vs grpcio",
                       "All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document."),
     "packaging": ("Extraction isolation",
@@ -1414,7 +1647,7 @@ def write_html_report():
     gaps = [
 
         ("Compression", "mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
-        ("Concurrency", "PollingServer overlaps bounded unary h2c connection I/O; handlers remain serialized. TLS and streaming RPCs use the blocking server (PRIMITIVES.md #7)."),
+        ("Concurrency", "PollingServer overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized. Streaming RPCs use the blocking server (PRIMITIVES.md #7)."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
     ]
     for k, v in gaps:
@@ -1472,7 +1705,7 @@ def write_report():
         "",
 
         "- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
-        "- **Concurrency**: `PollingServer` overlaps bounded unary h2c connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). TLS and streaming RPCs remain on the blocking server.",
+        "- **Concurrency**: `PollingServer` overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). Streaming RPCs remain on the blocking server.",
         "",
     ]
     REPORT.write_text("\n".join(lines))
@@ -1493,6 +1726,7 @@ def main() -> int:
         section_grpc_client(tmp)
         section_grpc_server(tmp)
         section_grpc_polling_server(tmp)
+        section_grpc_polling_tls(tmp)
         section_grpc_tls(tmp)
     section_units()
     section_official_interop()

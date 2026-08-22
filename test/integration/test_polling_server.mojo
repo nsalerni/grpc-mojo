@@ -4,7 +4,11 @@ from std.ffi import c_int
 from std.testing import assert_equal, assert_true
 
 from grpc import PollingServer, PollingServerConfig, ServerContext
-from grpc.polling_server import _PendingWrite, _coalesce_poll_events
+from grpc.polling_server import (
+    _PendingWrite,
+    _can_move_http2_output,
+    _coalesce_poll_events,
+)
 from net import PollEvent
 
 
@@ -85,6 +89,71 @@ def test_config_and_registration() raises:
         raised = True
     assert_true(raised, "incomplete requests must have a positive bound")
 
+    raised = False
+    try:
+        var no_handshakes = PollingServerConfig(max_pending_handshakes=0)
+        no_handshakes.validate()
+    except:
+        raised = True
+    assert_true(raised, "pending TLS handshakes must have a positive bound")
+
+    raised = False
+    try:
+        var no_handshake_steps = PollingServerConfig(
+            max_handshake_steps_per_event=0
+        )
+        no_handshake_steps.validate()
+    except:
+        raised = True
+    assert_true(raised, "TLS handshake work must have a positive bound")
+
+    raised = False
+    try:
+        var no_handshake_timeout = PollingServerConfig(
+            tls_handshake_timeout_ms=0
+        )
+        no_handshake_timeout.validate()
+    except:
+        raised = True
+    assert_true(raised, "TLS handshakes must have an absolute timeout")
+
+    raised = False
+    try:
+        var idle_overflow = PollingServerConfig(idle_timeout_ms=0x80000000)
+        idle_overflow.validate()
+    except:
+        raised = True
+    assert_true(raised, "idle timeout must fit the Poller millisecond ABI")
+
+    raised = False
+    try:
+        var request_overflow = PollingServerConfig(
+            incomplete_request_timeout_ms=0x80000000
+        )
+        request_overflow.validate()
+    except:
+        raised = True
+    assert_true(raised, "request timeout must fit the Poller millisecond ABI")
+
+    raised = False
+    try:
+        var handshake_overflow = PollingServerConfig(
+            tls_handshake_timeout_ms=0x80000000
+        )
+        handshake_overflow.validate()
+    except:
+        raised = True
+    assert_true(raised, "handshake timeout must fit the Poller millisecond ABI")
+
+    var tls_server = PollingServer.tls(
+        "127.0.0.1",
+        0,
+        "build/certs/server.pem",
+        "build/certs/server.key",
+        config,
+    )
+    tls_server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
+
 
 def test_duplicate_poll_events_coalesce() raises:
     var events = [
@@ -141,8 +210,15 @@ def test_partial_write_keeps_exact_suffix() raises:
     assert_equal(len(pending), 0)
 
 
+def test_blocked_tls_read_preserves_one_output_store() raises:
+    assert_true(_can_move_http2_output(False, False))
+    assert_true(_can_move_http2_output(True, False))
+    assert_true(not _can_move_http2_output(True, True))
+
+
 def main() raises:
     test_config_and_registration()
     test_duplicate_poll_events_coalesce()
     test_partial_write_keeps_exact_suffix()
+    test_blocked_tls_read_preserves_one_output_store()
     print("test_polling_server: all tests passed")

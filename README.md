@@ -30,8 +30,8 @@ not our own tests:
 
 Current limits (tracked in [docs/PRIMITIVES.md](docs/PRIMITIVES.md)):
 the blocking `Server` remains sequential, while the opt-in `PollingServer`
-overlaps bounded unary h2c connection I/O with serialized handlers. TLS and
-streaming RPCs use the blocking server. Bidi is recv-driven, and compression
+overlaps bounded unary h2c or TLS connection I/O with serialized handlers.
+Streaming RPCs use the blocking server. Bidi is recv-driven, and compression
 codecs are not included yet.
 
 ## Layout
@@ -106,10 +106,11 @@ def main() raises:
     server.serve()
 ```
 
-For many unary h2c connections on one thread, replace `Server` with
-`PollingServer`. Its configuration bounds accepted connections, work per
-readiness event, idle and incomplete requests, message size, and retained
-output. Handler calls remain serial and should return promptly.
+For many unary connections on one thread, replace `Server` with
+`PollingServer`. Its configuration bounds accepted connections, TLS
+handshakes, work per readiness event, idle and incomplete requests, message
+size, and retained output. Handler calls remain serial and should return
+promptly.
 
 ```mojo
 from grpc import PollingServer, PollingServerConfig
@@ -122,6 +123,13 @@ var server = PollingServer("127.0.0.1", 50051, config)
 server.register_unary[say](ECHO_SAY_PATH)
 server.serve()
 ```
+
+Use `PollingServer.tls` with a PEM certificate chain and key for secure unary
+services. It performs non-blocking handshakes, accepts only the `h2` ALPN
+token, and uses one certificate chain for all clients. Client certificate
+authentication and SNI-based certificate selection are not yet supported.
+The runnable [TLS polling example](examples/polling_tls_server.mojo) exposes
+the handshake and output limits used by a typical service.
 
 Client ([examples/echo_client.mojo](examples/echo_client.mojo)):
 

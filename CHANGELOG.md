@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-- Added an opt-in `PollingServer` for bounded concurrent unary h2c
-  connection I/O over kqueue and epoll. Handlers remain serialized.
+- Added an opt-in `PollingServer` for bounded concurrent unary h2c or TLS
+  connection I/O over kqueue and epoll. TLS handshakes are non-blocking,
+  strictly require `h2` ALPN, and have explicit admission, work, and time
+  limits. Handlers remain serialized.
 - Made `GrpcTransport` implement `ReadinessStream` for pollable partial TCP
   and TLS I/O, including exact TLS retry direction.
 

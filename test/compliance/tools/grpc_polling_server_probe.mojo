@@ -1,4 +1,4 @@
-# Compliance tool: bounded unary h2c PollingServer exercised by grpcio.
+# Compliance tool: bounded unary PollingServer exercised by grpcio.
 
 from std.sys import argv
 
@@ -38,6 +38,7 @@ def main() raises:
     var max_frames_per_event = 64
     var idle_timeout_ms = 300_000
     var incomplete_request_timeout_ms = 30_000
+    var tls_handshake_timeout_ms = 10_000
     if len(args) > 1:
         max_connections = Int(args[1])
     if len(args) > 2:
@@ -50,6 +51,8 @@ def main() raises:
         idle_timeout_ms = Int(args[5])
     if len(args) > 6:
         incomplete_request_timeout_ms = Int(args[6])
+    if len(args) > 7:
+        tls_handshake_timeout_ms = Int(args[7])
     var config = PollingServerConfig(
         max_connections=max_connections,
         max_message_size=max_message_size,
@@ -57,8 +60,18 @@ def main() raises:
         max_frames_per_event=max_frames_per_event,
         idle_timeout_ms=idle_timeout_ms,
         incomplete_request_timeout_ms=incomplete_request_timeout_ms,
+        tls_handshake_timeout_ms=tls_handshake_timeout_ms,
     )
-    var server = PollingServer("127.0.0.1", 0, config)
+    var server: PollingServer
+    if len(args) > 8:
+        if len(args) != 11 or args[8] != "tls":
+            raise Error(
+                "usage: grpc_polling_server_probe [six limits] "
+                "[handshake_ms] [tls cert key]"
+            )
+        server = PollingServer.tls("127.0.0.1", 0, args[9], args[10], config)
+    else:
+        server = PollingServer("127.0.0.1", 0, config)
     server.register_unary[echo]("/probe.Probe/Echo")
     server.register_unary[fail]("/probe.Probe/Fail")
     server.register_unary[large]("/probe.Probe/Large")
