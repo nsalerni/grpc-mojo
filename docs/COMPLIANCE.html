@@ -85,14 +85,14 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">158/158</span><span>checks passed</span><span class="when">2026-08-22 22:12 UTC</span></div>
+<div class="verdict"><span class="score">159/159</span><span>checks passed</span><span class="when">2026-08-22 22:55 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
-<li>tls <span class="n">11/11</span></li>
+<li>tls <span class="n">12/12</span></li>
 <li>grpc <span class="n">23/23</span></li>
 <li>grpc-tls <span class="n">3/3</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
@@ -186,6 +186,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>partial Mojo TLS reads preserve WANT_READ against CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS write preserves WANT_WRITE under CPython backpressure</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>fatal session teardown does not contaminate the next nonblocking TLS session</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>reset peers with rejected ALPN do not terminate the server</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc</span> <span class="vs">vs</span> grpcio</h2>
