@@ -91,6 +91,7 @@ jobs:
         with:
           pixi-version: latest
           cache: true
+          cache-write: false
           post-cleanup: true
 
       - name: Fetch source dependencies
