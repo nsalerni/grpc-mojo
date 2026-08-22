@@ -9,7 +9,7 @@ preview = ["pixi-build"]
 
 [tasks]
 prepare-tls = "python3 tools/prepare_tls.py"
-test = { cmd = "python3 tools/run_tests.py", depends-on = ["prepare-tls"] }
+test = { cmd = "python3 tools/check_compliance_report.py && python3 tools/run_tests.py", depends-on = ["prepare-tls"] }
 bench = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo"
 bench-smoke = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo --smoke && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo --smoke && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo --smoke && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo --smoke"
 example-server = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I examples examples/echo_server.mojo"
@@ -19,7 +19,7 @@ gen-hpack = "python3 packages/mojo-http2/tools/gen_hpack_tables.py"
 gen-vectors = "python3 packages/protomojo/tools/gen_proto_vectors.py"
 gen-proto = "python3 -m grpc_tools.protoc -Ipackages/protomojo/test --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/test packages/protomojo/test/vectors.proto && python3 -m grpc_tools.protoc -Iexamples --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=examples examples/echo.proto && cp examples/echo_pb.mojo test/echo_pb.mojo"
 interop = { cmd = "python3 test/interop/run_interop.py", depends-on = ["prepare-tls"] }
-compliance = { cmd = "python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
+compliance = { cmd = "python3 tools/check_compliance_report.py && python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
 interop-official = { cmd = "python3 test/interop/official/run_official.py", depends-on = ["prepare-tls"] }
 check-extraction = "python3 tools/check_extraction.py"
 package-test = "python3 packaging/test_installed_package.py"
