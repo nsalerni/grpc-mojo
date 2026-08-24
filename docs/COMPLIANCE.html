@@ -85,7 +85,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">159/159</span><span>checks passed</span><span class="when">2026-08-22 22:55 UTC</span></div>
+<div class="verdict"><span class="score">183/183</span><span>checks passed</span><span class="when">2026-08-24 03:52 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
@@ -98,7 +98,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <li>grpc-transport <span class="n">2/2</span></li>
 <li>grpc-polling <span class="n">11/11</span></li>
 <li>grpc-polling-tls <span class="n">5/5</span></li>
-<li>grpc-official <span class="n">48/48</span></li>
+<li>grpc-official <span class="n">72/72</span></li>
 <li>packaging <span class="n">6/6</span></li>
 <li>units <span class="n">2/2</span></li>
 <li>h2_tls <span class="n">4/4</span></li>
@@ -264,7 +264,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 </table></div></section>
 <section>
 <h2><span class="pkg">Official gRPC interoperability</span> <span class="vs">vs</span> grpcio</h2>
-<p class="method">All 12 canonical interoperability cases run with grpc-mojo in both client and server roles, over both h2c and verified TLS. These rows and the published badge come from the same machine-readable result document.</p>
+<p class="method">All 12 canonical interoperability cases run with grpc-mojo in both client and server roles over h2c, verified TLS, and Unix domain sockets. These rows and the published badge come from the same machine-readable result document.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>grpc-mojo client vs grpcio server (h2c): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -291,6 +291,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>grpc-mojo client vs grpcio server (TLS): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpc-mojo client vs grpcio server (TLS): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpc-mojo client vs grpcio server (TLS): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpc-mojo client vs grpcio server (Unix): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client vs grpc-mojo server (h2c): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client vs grpc-mojo server (h2c): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client vs grpc-mojo server (h2c): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -315,6 +327,18 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>grpcio client vs grpc-mojo server (TLS): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client vs grpc-mojo server (TLS): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client vs grpc-mojo server (TLS): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): empty_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): large_unary</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): client_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): server_streaming</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): ping_pong</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): empty_stream</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): custom_metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): status_code_and_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): special_status_message</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): unimplemented_method</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): timeout_on_sleeping_server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio client vs grpc-mojo server (Unix): cancel_after_begin</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2>Extraction isolation</h2>
@@ -333,7 +357,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <p class="method">The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td>unit test files (27/27 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>unit test files (28/28 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>interop suite (interop: 7 passed, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>

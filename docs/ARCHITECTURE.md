@@ -134,8 +134,8 @@ pending handshakes have their own admission cap.
   examples from protobuf.dev, and golden bytes produced by Python's
   `grpcio`/`protobuf` are checked into `test/`.
 * **Interop**: `test/interop/` runs the Mojo client against a `grpcio` Python
-  server and vice versa over h2c and TLS. The definition of "compatible" is
-  "talks to the reference implementation".
+  server and vice versa over h2c, TLS, and Unix sockets. The definition of
+  "compatible" is "talks to the reference implementation".
 * Unit tests use `std.testing` and run with `pixi run test`.
 
 ## Out of scope for v0 (tracked in PRIMITIVES.md and issues)

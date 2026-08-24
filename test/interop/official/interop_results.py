@@ -7,8 +7,10 @@ import json
 DIRECTIONS = (
     ("mojo-client-h2c", "grpc-mojo client vs grpcio server", "h2c"),
     ("mojo-client-tls", "grpc-mojo client vs grpcio server", "TLS"),
+    ("mojo-client-unix", "grpc-mojo client vs grpcio server", "Unix"),
     ("grpcio-client-h2c", "grpcio client vs grpc-mojo server", "h2c"),
     ("grpcio-client-tls", "grpcio client vs grpc-mojo server", "TLS"),
+    ("grpcio-client-unix", "grpcio client vs grpc-mojo server", "Unix"),
 )
 
 
@@ -108,7 +110,7 @@ def badge_payload(document: dict[str, object]) -> dict[str, object]:
 
     messages = []
     complete = not problems
-    for transport in ("h2c", "TLS"):
+    for transport in ("h2c", "TLS", "Unix"):
         transport_rows = [row for row in rows if row["transport"] == transport]
         passed = sum(1 for row in transport_rows if row["passed"])
         total = len(transport_rows)

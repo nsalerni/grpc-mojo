@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Server: gRPC over blocking HTTP/2, with h2c and TLS transports.
+"""Server: gRPC over blocking HTTP/2 on TCP, TLS, or Unix sockets.
 
 Handlers are thin function pointers registered at compile time via
 `Server.register_unary`, `register_server_streaming`,
@@ -37,7 +37,7 @@ from std.time import monotonic
 
 from hpack import HeaderField
 from h2 import ERR_NO_ERROR, Http2Connection
-from net import TCPListener
+from net import TCPListener, UnixListener
 from proto import ProtoMessage, decode, encode
 from tls import TLSContext
 
@@ -387,6 +387,10 @@ struct Server(Movable):
     """Routing table from full method path to handler."""
     var _tls_context: Optional[TLSContext]
     """Reusable server TLS context; None selects plaintext h2c."""
+    var _unix_path: Optional[String]
+    """Unix domain socket path; None selects a TCP listener."""
+    var _unix_remove_existing: Bool
+    """Whether a Unix listener may remove an existing socket file."""
 
     def __init__(out self, host: StringSpan, port: UInt16):
         """Constructs a server with an empty routing table.
@@ -400,6 +404,8 @@ struct Server(Movable):
         self.port = port
         self.routes = Dict[String, Route]()
         self._tls_context = None
+        self._unix_path = None
+        self._unix_remove_existing = False
 
     @staticmethod
     def tls(
@@ -426,6 +432,23 @@ struct Server(Movable):
         out._tls_context = TLSContext.server(
             cert_chain_pem, key_pem, alpn=[String("h2")]
         )
+        return out^
+
+    @staticmethod
+    def unix(path: StringSpan, *, remove_existing: Bool = False) -> Server:
+        """Constructs a plaintext server on a Unix domain socket.
+
+        Args:
+            path: Filesystem path to bind.
+            remove_existing: Remove an existing socket file before bind.
+                The default refuses to replace any existing path.
+
+        Returns:
+            A server configured for the Unix domain socket.
+        """
+        var out = Server("", 0)
+        out._unix_path = String(path)
+        out._unix_remove_existing = remove_existing
         return out^
 
     # --- registration (typed handlers wrapped at compile time) ---
@@ -738,8 +761,29 @@ struct Server(Movable):
         Does not return under normal operation.
 
         Raises:
-            If the listener cannot bind the configured host and port.
+            If the TCP listener cannot bind the configured host and port,
+            or the Unix listener cannot bind its configured path.
         """
+        if self._unix_path:
+            var path = self._unix_path.value().copy()
+            var listener = UnixListener(
+                path, remove_existing=self._unix_remove_existing
+            )
+            print("grpc-mojo server listening on unix:", path)
+            while True:
+                var unix = listener.accept()
+                try:
+                    var transport = GrpcTransport.local(unix^)
+                    var conn = Http2Connection(transport^, is_client=False)
+                    try:
+                        self._serve_connection_impl(conn)
+                    except:
+                        # Client disconnected or committed a protocol error.
+                        conn.close()
+                except:
+                    # A failed connection does not stop the listener.
+                    pass
+
         var listener = TCPListener(self.host, self.port)
         print(
             "grpc-mojo server listening on ",

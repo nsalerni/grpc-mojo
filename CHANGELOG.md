@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added blocking gRPC clients and servers over Unix domain sockets.
+- Expanded the official grpcio interop matrix to cover all 12 cases in both
+  roles over Unix sockets, alongside h2c and TLS.
+
 ## 0.2.2 - 2026-08-22
 
 - Added an opt-in `PollingServer` for bounded concurrent unary h2c or TLS
