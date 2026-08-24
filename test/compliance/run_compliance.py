@@ -56,6 +56,15 @@ MOJO_RUN = [
 
 RESULTS: dict[str, list[tuple[str, bool, str]]] = {}
 
+EXPECTED_GRPC_TLS_CHECKS = (
+    "Mojo TLS client: 64 KiB unary echo via grpcio server",
+    "Mojo TLS client rejects a grpcio certificate hostname mismatch",
+    "Mojo client certificate: trusted identity completes a 64 KiB grpcio echo",
+    "Mojo client certificate: missing identity is rejected before handler dispatch",
+    "Mojo client certificate: untrusted identity is rejected before handler dispatch",
+    "grpcio TLS client: unary echo via Mojo server",
+)
+
 # Package suites executed and aggregated by this umbrella (in report order).
 PACKAGE_SUITES = ("protomojo", "mojo-http2", "mojo-net", "mojo-tls")
 
@@ -254,7 +263,13 @@ def section_grpc_transport():
     )
 
 
-def make_grpcio_probe_server(pb, use_tls: bool = False):
+def make_grpcio_probe_server(
+    pb,
+    use_tls: bool = False,
+    *,
+    require_client_auth: bool = False,
+    auth_observations: list[dict[str, list[bytes]]] | None = None,
+):
     import grpc
     code_by_num = {c.value[0]: c for c in grpc.StatusCode}
 
@@ -276,6 +291,8 @@ def make_grpcio_probe_server(pb, use_tls: bool = False):
         return pb.EchoResponse(message=str(int(ctx.time_remaining() * 1000)))
 
     def echo(req, ctx):
+        if auth_observations is not None:
+            auth_observations.append(ctx.auth_context())
         return pb.EchoResponse(message=req.message)
 
     def sleep_5s(req, ctx):
@@ -304,10 +321,20 @@ def make_grpcio_probe_server(pb, use_tls: bool = False):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     server.add_generic_rpc_handlers((Handler(),))
     if use_tls:
-        credentials = grpc.ssl_server_credentials(((
-            (CERTS / "server.key").read_bytes(),
-            (CERTS / "server.pem").read_bytes(),
-        ),))
+        credentials = grpc.ssl_server_credentials(
+            (
+                (
+                    (CERTS / "server.key").read_bytes(),
+                    (CERTS / "server.pem").read_bytes(),
+                ),
+            ),
+            root_certificates=(
+                (CERTS / "ca.pem").read_bytes()
+                if require_client_auth
+                else None
+            ),
+            require_client_auth=require_client_auth,
+        )
         port = server.add_secure_port("127.0.0.1:0", credentials)
     else:
         port = server.add_insecure_port("127.0.0.1:0")
@@ -1355,6 +1382,90 @@ def section_grpc_tls(tmp: Path):
     finally:
         server.stop(0)
 
+    auth_observations = []
+    server, port = make_grpcio_probe_server(
+        pb,
+        use_tls=True,
+        require_client_auth=True,
+        auth_observations=auth_observations,
+    )
+    try:
+        r = run_tool(
+            "grpc_client_probe",
+            port,
+            "echo",
+            65536,
+            "tls",
+            CERTS / "ca.pem",
+            "localhost",
+            CERTS / "client-chain.pem",
+            CERTS / "client.key",
+            timeout=120,
+        )
+        expected_common_name = [b"mojo-tls test client"]
+        expected_leaf = [(CERTS / "client.pem").read_bytes()]
+        trusted_ok = (
+            r.returncode == 0
+            and "len=65536 match=True code=0" in r.stdout
+            and len(auth_observations) == 1
+            and auth_observations[0].get("x509_common_name")
+            == expected_common_name
+            and auth_observations[0].get("x509_pem_cert") == expected_leaf
+            and auth_observations[0].get("transport_security_type")
+            == [b"ssl"]
+        )
+        record(
+            "grpc-tls",
+            "Mojo client certificate: trusted identity completes a 64 KiB grpcio echo",
+            trusted_ok,
+            f"returncode={r.returncode} handler_calls={len(auth_observations)} "
+            f"common_name={auth_observations[0].get('x509_common_name')!r} "
+            f"leaf_match={auth_observations[0].get('x509_pem_cert') == expected_leaf} "
+            f"transport={auth_observations[0].get('transport_security_type')!r}"
+            if auth_observations else
+            f"returncode={r.returncode} handler_calls=0",
+        )
+
+        calls_before = len(auth_observations)
+        r = run_tool(
+            "grpc_client_probe",
+            port,
+            "echo",
+            1,
+            "tls",
+            CERTS / "ca.pem",
+            "localhost",
+            timeout=120,
+        )
+        record(
+            "grpc-tls",
+            "Mojo client certificate: missing identity is rejected before handler dispatch",
+            r.returncode != 0 and len(auth_observations) == calls_before,
+            f"returncode={r.returncode} handler_calls={len(auth_observations)}",
+        )
+
+        calls_before = len(auth_observations)
+        r = run_tool(
+            "grpc_client_probe",
+            port,
+            "echo",
+            1,
+            "tls",
+            CERTS / "ca.pem",
+            "localhost",
+            CERTS / "untrusted_client.pem",
+            CERTS / "untrusted_client.key",
+            timeout=120,
+        )
+        record(
+            "grpc-tls",
+            "Mojo client certificate: untrusted identity is rejected before handler dispatch",
+            r.returncode != 0 and len(auth_observations) == calls_before,
+            f"returncode={r.returncode} handler_calls={len(auth_observations)}",
+        )
+    finally:
+        server.stop(0)
+
     proc = subprocess.Popen(
         [
             *MOJO_RUN,
@@ -1458,6 +1569,46 @@ def section_order() -> list[str]:
     return known + [s for s in RESULTS if s not in known]
 
 
+def grpc_tls_result_summary(
+    results: dict[str, list[tuple[str, bool, str]]],
+) -> tuple[int, int, bool]:
+    """Count the registered gRPC TLS checks and reject missing rows."""
+    rows = results.get("grpc-tls", [])
+    observed: dict[str, bool] = {}
+    duplicate = False
+    for name, ok, _ in rows:
+        if name in observed:
+            duplicate = True
+        observed[name] = bool(ok)
+
+    expected = set(EXPECTED_GRPC_TLS_CHECKS)
+    passed = sum(observed.get(name, False) for name in EXPECTED_GRPC_TLS_CHECKS)
+    valid = (
+        len(rows) == len(EXPECTED_GRPC_TLS_CHECKS)
+        and set(observed) == expected
+        and not duplicate
+    )
+    total = len(EXPECTED_GRPC_TLS_CHECKS)
+    if not valid and passed == total:
+        passed -= 1
+    return passed, total, valid
+
+
+def report_result_summary(
+    results: dict[str, list[tuple[str, bool, str]]],
+) -> tuple[int, int, bool]:
+    """Count all rows while holding gRPC TLS to its exact registry."""
+    grpc_passed, grpc_total, grpc_valid = grpc_tls_result_summary(results)
+    passed = grpc_passed
+    total = grpc_total
+    for section, rows in results.items():
+        if section == "grpc-tls":
+            continue
+        passed += sum(1 for _, ok, _ in rows if ok)
+        total += len(rows)
+    return passed, total, grpc_valid
+
+
 SECTION_TITLES = {
     "proto": ("`proto` vs Python `protobuf`",
               "Randomized differential testing: the reference implementation encodes seeded random messages; grpc-mojo decodes and re-encodes them; the reference parses the result and compares for semantic equality (byte equality where the encoding is deterministic). Malformed inputs must be accepted/rejected in agreement with the reference."),
@@ -1472,7 +1623,7 @@ SECTION_TITLES = {
     "grpc": ("`grpc` vs grpcio",
              "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
     "grpc-tls": ("`grpc` over TLS vs grpcio",
-                 "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Payloads cross the reference boundary through grpcio and grpc-mojo."),
+                 "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo."),
     "grpc-transport": ("`GrpcTransport` vs CPython sockets and ssl",
                        "The readiness wrapper transfers a large payload through CPython TCP and TLS peers with partial reads, partial writes, and would-block handling. TLS retries preserve the direction reported by OpenSSL across same-operation retries."),
     "grpc-polling": ("`PollingServer` with grpcio and hyper-h2 external peers",
@@ -1580,10 +1731,9 @@ def esc(t: str) -> str:
 
 
 def write_html_report():
-    total = sum(len(v) for v in RESULTS.values())
-    passed = sum(1 for v in RESULTS.values() for _, ok, _ in v if ok)
+    passed, total, results_valid = report_result_summary(RESULTS)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    all_ok = passed == total
+    all_ok = results_valid and passed == total
     h = [HTML_HEAD, "<main>", "<header>"]
     h.append('<p class="eyebrow">grpc-mojo &middot; differential compliance run</p>')
     h.append("<h1>Every layer, checked against the reference implementation</h1>")
@@ -1605,10 +1755,15 @@ def write_html_report():
         if section not in RESULTS:
             continue
         rows = RESULTS[section]
-        p = sum(1 for _, ok, _ in rows if ok)
-        cls = "" if p == len(rows) else " failing"
+        if section == "grpc-tls":
+            p, section_total, section_valid = grpc_tls_result_summary(RESULTS)
+        else:
+            p = sum(1 for _, ok, _ in rows if ok)
+            section_total = len(rows)
+            section_valid = True
+        cls = "" if section_valid and p == section_total else " failing"
         h.append(
-            f'<li>{esc(section)} <span class="n{cls}">{p}/{len(rows)}</span></li>'
+            f'<li>{esc(section)} <span class="n{cls}">{p}/{section_total}</span></li>'
         )
     h.append("</ul></header>")
 
@@ -1664,8 +1819,7 @@ def write_html_report():
 
 
 def write_report():
-    total = sum(len(v) for v in RESULTS.values())
-    passed = sum(1 for v in RESULTS.values() for _, ok, _ in v if ok)
+    passed, total, results_valid = report_result_summary(RESULTS)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "# Compliance & Compatibility Report",
@@ -1693,8 +1847,12 @@ def write_report():
             continue
         title, blurb = SECTION_TITLES.get(section, (f"`{section}`", ""))
         rows = RESULTS[section]
-        p = sum(1 for _, ok, _ in rows if ok)
-        lines += ["", f"## {title}: {p}/{len(rows)}", "", blurb, "",
+        if section == "grpc-tls":
+            p, section_total, _ = grpc_tls_result_summary(RESULTS)
+        else:
+            p = sum(1 for _, ok, _ in rows if ok)
+            section_total = len(rows)
+        lines += ["", f"## {title}: {p}/{section_total}", "", blurb, "",
                   "| Check | Result |", "|---|---|"]
         for name, ok, detail in rows:
             status = "✅ pass" if ok else f"❌ **fail**: {detail[:160]}"
@@ -1712,7 +1870,7 @@ def write_report():
     print(f"\ncompliance: {passed}/{total} checks passed")
     print(f"report: {REPORT.relative_to(ROOT)}")
     write_html_report()
-    return passed == total
+    return results_valid and passed == total
 
 
 def main() -> int:

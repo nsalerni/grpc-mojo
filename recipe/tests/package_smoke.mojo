@@ -1,6 +1,7 @@
 from std.testing import assert_equal, assert_true
 
 from grpc import (
+    GrpcChannel,
     Metadata,
     Status,
     StatusCode,
@@ -40,9 +41,21 @@ struct PackageMessage(Copyable, Defaultable, Movable, ProtoMessage):
                 reader.capture_field(tag[0], tag[1], self._unknown)
 
 
+def _check_client_identity_api() raises:
+    """Type-checks the installed channel API without opening a connection."""
+    _ = GrpcChannel.connect_tls(
+        "localhost",
+        443,
+        cert_chain_pem="client-chain.pem",
+        key_pem="client.key",
+    )
+
+
 def main() raises:
     assert_true(Status.ok().is_ok())
-    assert_equal(String(status_code_name(StatusCode.UNAVAILABLE)), "UNAVAILABLE")
+    assert_equal(
+        String(status_code_name(StatusCode.UNAVAILABLE)), "UNAVAILABLE"
+    )
     assert_equal(encode_timeout(1_500), "1500n")
     assert_equal(decode_timeout("2m"), 2_000_000)
 

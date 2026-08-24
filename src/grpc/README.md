@@ -15,7 +15,8 @@ item 7). Handlers are compile-time function parameters registered via
 
 TLS clients use `GrpcChannel.connect_tls`; TLS servers use `Server.tls`.
 Both require the `h2` ALPN token, and clients verify the certificate chain
-and hostname by default.
+and hostname by default. Clients can also load a PEM certificate chain and
+private key from files when the server requires mutual TLS.
 
 Blocking local services can use `GrpcChannel.connect_unix` and `Server.unix`.
 The client uses `localhost` as its default `:authority`. The server refuses

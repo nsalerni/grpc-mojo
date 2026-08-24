@@ -144,6 +144,21 @@ def main() raises:
     print(client.say(req, timeout_ns=10_000_000_000).message)
 ```
 
+For a server that requires a client certificate, open the channel with paths
+to the client chain and its unencrypted private key. Server certificate and
+hostname verification stay enabled.
+
+```mojo
+from grpc import GrpcChannel
+
+var channel = GrpcChannel.connect_tls(
+    "api.example.com",
+    443,
+    cert_chain_pem="client-chain.pem",
+    key_pem="client.key",
+)
+```
+
 Local services can use a Unix domain socket instead of a TCP port. The
 client sends `localhost` as `:authority` unless the caller supplies another
 value.

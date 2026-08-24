@@ -140,6 +140,8 @@ struct GrpcChannel(Movable):
         *,
         server_name: String = "",
         ca_file: String = "",
+        cert_chain_pem: String = "",
+        key_pem: String = "",
     ) raises -> GrpcChannel:
         """Opens a verified TLS connection with mandatory `h2` ALPN.
 
@@ -149,6 +151,10 @@ struct GrpcChannel(Movable):
             server_name: Name used for SNI and hostname verification;
                 empty uses `host`.
             ca_file: PEM trust bundle; empty uses the system trust store.
+            cert_chain_pem: Path to the client certificate chain PEM file.
+                Must be paired with `key_pem`.
+            key_pem: Path to the unencrypted private key PEM file for
+                `cert_chain_pem`.
 
         Returns:
             A ready TLS channel with `:scheme` set to `https`.
@@ -158,7 +164,11 @@ struct GrpcChannel(Movable):
             ALPN negotiation, or an HTTP/2 handshake error.
         """
         var context = TLSContext.client(
-            verify=True, ca_file=ca_file, alpn=[String("h2")]
+            verify=True,
+            ca_file=ca_file,
+            cert_chain_pem=cert_chain_pem,
+            key_pem=key_pem,
+            alpn=[String("h2")],
         )
         var tcp = TCPStream.connect(host, port)
         var name = server_name
