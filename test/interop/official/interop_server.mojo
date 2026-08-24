@@ -1,7 +1,7 @@
 # Official gRPC interop TestService implemented on grpc-mojo.
 # Semantics follow grpc/grpc doc/interop-test-descriptions.md.
 #
-# Prints its port, then serves forever.
+# Prints its endpoint, then serves forever.
 
 from echo_pb import EchoRequest  # noqa: keeps -I test module path warm
 from empty_pb import Empty
@@ -115,7 +115,9 @@ def full_duplex(mut ctx: ServerContext, mut call: ServerCall) raises:
 def main() raises:
     var args = argv()
     var server: Server
-    if len(args) >= 3:
+    if len(args) >= 3 and args[1] == "unix":
+        server = Server.unix(args[2], remove_existing=True)
+    elif len(args) >= 3:
         server = Server.tls("127.0.0.1", 0, args[1], args[2])
     else:
         server = Server("127.0.0.1", 0)

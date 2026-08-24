@@ -2,6 +2,7 @@
 """Regression checks for official interop result reporting."""
 
 import json
+from pathlib import Path
 import unittest
 
 from interop_results import badge_payload, result_document, stable_json
@@ -11,9 +12,12 @@ CASES = ["empty_unary", "large_unary"]
 DIRECTIONS = (
     "mojo-client-h2c",
     "mojo-client-tls",
+    "mojo-client-unix",
     "grpcio-client-h2c",
     "grpcio-client-tls",
+    "grpcio-client-unix",
 )
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def complete_results() -> list[tuple[str, str, bool, str]]:
@@ -31,7 +35,7 @@ class InteropResultsTest(unittest.TestCase):
         self.assertEqual(badge_payload(document), {
             "schemaVersion": 1,
             "label": "gRPC interop",
-            "message": "h2c 4/4 | TLS 4/4",
+            "message": "h2c 4/4 | TLS 4/4 | Unix 4/4",
             "color": "brightgreen",
         })
 
@@ -42,7 +46,9 @@ class InteropResultsTest(unittest.TestCase):
 
         payload = badge_payload(result_document(CASES, results))
 
-        self.assertEqual(payload["message"], "h2c 3/4 | TLS 4/4")
+        self.assertEqual(
+            payload["message"], "h2c 3/4 | TLS 4/4 | Unix 4/4"
+        )
         self.assertEqual(payload["color"], "red")
 
     def test_missing_result_cannot_produce_a_green_badge(self):
@@ -50,7 +56,9 @@ class InteropResultsTest(unittest.TestCase):
 
         payload = badge_payload(document)
 
-        self.assertEqual(payload["message"], "h2c 4/4 | TLS 3/4")
+        self.assertEqual(
+            payload["message"], "h2c 4/4 | TLS 4/4 | Unix 3/4"
+        )
         self.assertEqual(payload["color"], "red")
 
     def test_serialization_is_stable(self):
@@ -59,6 +67,16 @@ class InteropResultsTest(unittest.TestCase):
         serialized = stable_json(document)
         self.assertEqual(json.loads(serialized), document)
         self.assertEqual(serialized, stable_json(document))
+
+    def test_checked_in_badge_matches_checked_in_results(self):
+        document = json.loads(
+            (ROOT / "docs/official-interop-results.json").read_text()
+        )
+        badge = json.loads(
+            (ROOT / "docs/official-interop-badge.json").read_text()
+        )
+
+        self.assertEqual(badge_payload(document), badge)
 
 
 if __name__ == "__main__":

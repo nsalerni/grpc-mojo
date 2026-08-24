@@ -166,29 +166,47 @@ class RefTestService(grpc.GenericRpcHandler):
 
 # --- direction A: mojo client vs grpcio server ------------------------------
 
-def run_direction_a(use_tls: bool):
-    mode = "TLS" if use_tls else "h2c"
+def run_direction_a(mode: str):
     print(f"== mojo interop_client vs grpcio reference server ({mode}) ==")
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
     server.add_generic_rpc_handlers((RefTestService(),))
-    if use_tls:
+    unix_dir = None
+    socket_path = None
+    if mode == "TLS":
         credentials = grpc.ssl_server_credentials(((
             (CERTS / "server.key").read_bytes(),
             (CERTS / "server.pem").read_bytes(),
         ),))
         port = server.add_secure_port("127.0.0.1:0", credentials)
+    elif mode == "Unix":
+        unix_dir = tempfile.TemporaryDirectory(
+            prefix="grpc_mojo_official_", dir="/tmp"
+        )
+        socket_path = Path(unix_dir.name) / "server.sock"
+        port = server.add_insecure_port(f"unix:{socket_path}")
     else:
         port = server.add_insecure_port("127.0.0.1:0")
+    if port == 0:
+        raise RuntimeError(f"grpcio could not bind its {mode} endpoint")
     server.start()
     try:
         for case in CASES:
-            command = [
-                *MOJO_RUN,
-                str(HERE / "interop_client.mojo"),
-                str(port),
-                case,
-            ]
-            if use_tls:
+            if mode == "Unix":
+                command = [
+                    *MOJO_RUN,
+                    str(HERE / "interop_client.mojo"),
+                    "unix",
+                    str(socket_path),
+                    case,
+                ]
+            else:
+                command = [
+                    *MOJO_RUN,
+                    str(HERE / "interop_client.mojo"),
+                    str(port),
+                    case,
+                ]
+            if mode == "TLS":
                 command.extend([
                     "tls", str(CERTS / "ca.pem"), "localhost",
                 ])
@@ -199,7 +217,9 @@ def run_direction_a(use_tls: bool):
             record(f"mojo-client-{mode.lower()}", case, ok,
                    f"rc={r.returncode} out={r.stdout.strip()!r} err={r.stderr[-200:]!r}")
     finally:
-        server.stop(0)
+        server.stop(0).wait()
+        if unix_dir is not None:
+            unix_dir.cleanup()
 
 
 # --- direction B: grpcio client vs mojo server -------------------------------
@@ -346,27 +366,45 @@ def run_case_b(case, channel):
         raise AssertionError(f"unknown case {case}")
 
 
-def run_direction_b(use_tls: bool):
-    mode = "TLS" if use_tls else "h2c"
+def run_direction_b(mode: str):
     print(f"== grpcio reference client vs mojo interop_server ({mode}) ==")
     command = [*MOJO_RUN, str(HERE / "interop_server.mojo")]
-    if use_tls:
+    unix_dir = None
+    socket_path = None
+    if mode == "TLS":
         command.extend([
             str(CERTS / "server.pem"), str(CERTS / "server.key"),
         ])
+    elif mode == "Unix":
+        unix_dir = tempfile.TemporaryDirectory(
+            prefix="grpc_mojo_official_", dir="/tmp"
+        )
+        socket_path = Path(unix_dir.name) / "server.sock"
+        command.extend(["unix", str(socket_path)])
     proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE, text=True, cwd=ROOT)
     line = proc.stdout.readline()
-    port = int(line.strip().rsplit(":", 1)[-1])
+    if not line:
+        returncode = proc.wait()
+        if unix_dir is not None:
+            unix_dir.cleanup()
+        raise RuntimeError(
+            f"grpc-mojo {mode} server exited before startup with "
+            f"status {returncode}"
+        )
     try:
-        if use_tls:
+        if mode == "TLS":
+            port = int(line.strip().rsplit(":", 1)[-1])
             credentials = grpc.ssl_channel_credentials(
                 root_certificates=(CERTS / "ca.pem").read_bytes()
             )
             channel_context = grpc.secure_channel(
                 f"localhost:{port}", credentials
             )
+        elif mode == "Unix":
+            channel_context = grpc.insecure_channel(f"unix:{socket_path}")
         else:
+            port = int(line.strip().rsplit(":", 1)[-1])
             channel_context = grpc.insecure_channel(f"127.0.0.1:{port}")
         with channel_context as channel:
             for case in CASES:
@@ -383,19 +421,21 @@ def run_direction_b(use_tls: bool):
     finally:
         proc.kill()
         proc.wait()
+        if unix_dir is not None:
+            unix_dir.cleanup()
 
 
 def main() -> int:
     BUILD.mkdir(exist_ok=True)
-    run_direction_a(False)
-    run_direction_a(True)
-    run_direction_b(False)
-    run_direction_b(True)
+    for mode in ("h2c", "TLS", "Unix"):
+        run_direction_a(mode)
+    for mode in ("h2c", "TLS", "Unix"):
+        run_direction_b(mode)
     document = result_document(CASES, RESULTS)
     RESULT_REPORT.write_text(stable_json(document))
     BADGE_REPORT.write_text(stable_json(badge_payload(document)))
     print(f"\nofficial interop: {PASS} passed, {FAIL} failed "
-          f"({len(CASES)} cases x 2 directions x 2 transports)")
+          f"({len(CASES)} cases x 2 directions x 3 transports)")
     print(f"report: {RESULT_REPORT.relative_to(ROOT)}")
     print(f"report: {BADGE_REPORT.relative_to(ROOT)}")
     return 1 if FAIL else 0

@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Client channel: gRPC calls over one h2c or TLS HTTP/2 connection.
+"""Client channel: gRPC calls over one TCP, TLS, or Unix socket connection.
 
 `GrpcChannel` multiplexes calls onto a single `Http2Connection`. Unary
 calls go through `unary` (typed, raises on non-OK) or `unary_bytes`
@@ -26,7 +26,7 @@ from std.time import monotonic
 
 from hpack import HeaderField
 from h2 import ERR_CANCEL, Http2Connection
-from net import TCPStream, is_timeout_error
+from net import TCPStream, UnixStream, is_timeout_error
 from tls import TLSContext
 from proto import ProtoMessage, decode, encode
 
@@ -62,7 +62,7 @@ struct CallResult(Movable):
 
 @fieldwise_init
 struct GrpcChannel(Movable):
-    """A client channel to one host and port over h2c or TLS.
+    """A client channel over TCP, TLS, or a Unix domain socket.
 
     Owns one HTTP/2 connection and issues calls over it. Create with
     `connect`; make unary calls with `unary`/`unary_bytes`, or drive
@@ -99,6 +99,36 @@ struct GrpcChannel(Movable):
         return GrpcChannel(
             conn=conn^,
             authority=String(host) + ":" + String(port),
+            scheme=String("http"),
+            deadline_ns=0,
+        )
+
+    @staticmethod
+    def connect_unix(
+        path: StringSpan, *, authority: StringSpan = "localhost"
+    ) raises -> GrpcChannel:
+        """Opens a Unix domain socket and performs the HTTP/2 preface.
+
+        Args:
+            path: Filesystem path of the listening Unix domain socket.
+            authority: Value for the HTTP/2 `:authority` pseudo-header.
+                Defaults to `localhost`.
+
+        Returns:
+            A ready plaintext channel over the Unix domain socket.
+
+        Raises:
+            If `authority` is empty, or on connection failure or an HTTP/2
+            handshake error.
+        """
+        if authority == "":
+            raise Error("grpc: Unix channel authority cannot be empty")
+        var unix = UnixStream.connect(path)
+        var transport = GrpcTransport.local(unix^)
+        var conn = Http2Connection(transport^, is_client=True)
+        return GrpcChannel(
+            conn=conn^,
+            authority=String(authority),
             scheme=String("http"),
             deadline_ns=0,
         )

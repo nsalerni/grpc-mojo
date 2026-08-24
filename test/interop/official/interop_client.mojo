@@ -1,5 +1,7 @@
 # Official gRPC interop test cases, client side, implemented on grpc-mojo.
-# Usage: interop_client <port> <case_name>
+# Usage:
+#   interop_client <port> <case_name> [tls <ca_file> <server_name>]
+#   interop_client unix <path> <case_name>
 # Prints "CASE-OK <name>" on success; raises (non-zero exit) on failure.
 #
 # Case semantics follow grpc/grpc doc/interop-test-descriptions.md.
@@ -269,10 +271,14 @@ def case_cancel_after_begin(mut channel: GrpcChannel) raises:
 
 def main() raises:
     var args = argv()
-    var port = UInt16(Int(args[1]))
-    var case_name = args[2]
     var channel: GrpcChannel
-    if len(args) >= 6 and args[3] == "tls":
+    var case_name: String
+    if args[1] == "unix":
+        case_name = args[3]
+        channel = GrpcChannel.connect_unix(args[2])
+    elif len(args) >= 6 and args[3] == "tls":
+        var port = UInt16(Int(args[1]))
+        case_name = args[2]
         channel = GrpcChannel.connect_tls(
             "127.0.0.1",
             port,
@@ -280,6 +286,8 @@ def main() raises:
             server_name=args[5],
         )
     else:
+        var port = UInt16(Int(args[1]))
+        case_name = args[2]
         channel = GrpcChannel.connect("127.0.0.1", port)
 
     if case_name == "empty_unary":

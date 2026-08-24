@@ -8,17 +8,17 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""The byte-stream transport shared by h2c and TLS gRPC connections."""
+"""The byte-stream transport shared by TCP, TLS, and Unix gRPC connections."""
 
 from std.ffi import c_int
 
-from net import ReadinessStream, TCPStream
+from net import ReadinessStream, TCPStream, UnixStream
 from tls import TLSStream
 
 
 @fieldwise_init
 struct GrpcTransport(ReadinessStream):
-    """A readiness-capable TCP or TLS stream for gRPC connections.
+    """A readiness-capable TCP, TLS, or Unix stream for gRPC connections.
 
     This keeps `GrpcChannel`, `ServerCall`, and generated service types
     transport-stable while `Http2Connection` continues to operate through
@@ -32,6 +32,7 @@ struct GrpcTransport(ReadinessStream):
 
     var _tcp: Optional[TCPStream]
     var _tls: Optional[TLSStream]
+    var _unix: Optional[UnixStream]
 
     @staticmethod
     def plaintext(var stream: TCPStream) -> GrpcTransport:
@@ -43,7 +44,7 @@ struct GrpcTransport(ReadinessStream):
         Returns:
             A transport carrying the TCP stream.
         """
-        var out = GrpcTransport(_tcp=None, _tls=None)
+        var out = GrpcTransport(_tcp=None, _tls=None, _unix=None)
         out._tcp = stream^
         return out^
 
@@ -57,8 +58,22 @@ struct GrpcTransport(ReadinessStream):
         Returns:
             A transport carrying the TLS stream.
         """
-        var out = GrpcTransport(_tcp=None, _tls=None)
+        var out = GrpcTransport(_tcp=None, _tls=None, _unix=None)
         out._tls = stream^
+        return out^
+
+    @staticmethod
+    def local(var stream: UnixStream) -> GrpcTransport:
+        """Wraps a connected Unix domain stream.
+
+        Args:
+            stream: The connected stream; ownership is taken.
+
+        Returns:
+            A transport carrying the Unix domain stream.
+        """
+        var out = GrpcTransport(_tcp=None, _tls=None, _unix=None)
+        out._unix = stream^
         return out^
 
     def descriptor(self) -> c_int:
@@ -69,6 +84,8 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             return self._tls.value().descriptor()
+        if self._unix:
+            return self._unix.value().descriptor()
         return self._tcp.value().descriptor()
 
     def _is_secure(self) -> Bool:
@@ -85,6 +102,9 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             self._tls.value().set_nonblocking(enabled)
+            return
+        if self._unix:
+            self._unix.value().set_nonblocking(enabled)
             return
         self._tcp.value().set_nonblocking(enabled)
 
@@ -103,6 +123,8 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             return self._tls.value().read(buf)
+        if self._unix:
+            return self._unix.value().read(buf)
         return self._tcp.value().read(buf)
 
     def write_some(self, data: Span[Byte, _]) raises -> Int:
@@ -123,6 +145,8 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             return self._tls.value().write_some(data)
+        if self._unix:
+            return self._unix.value().write_some(data)
         return self._tcp.value().write_some(data)
 
     def wants_read(self) raises -> Bool:
@@ -171,6 +195,8 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             return self._tls.value().read_exact(n)
+        if self._unix:
+            return self._unix.value().read_exact(n)
         return self._tcp.value().read_exact(n)
 
     def write_all(self, data: Span[Byte, _]) raises:
@@ -184,6 +210,9 @@ struct GrpcTransport(ReadinessStream):
         """
         if self._tls:
             self._tls.value().write_all(data)
+            return
+        if self._unix:
+            self._unix.value().write_all(data)
             return
         self._tcp.value().write_all(data)
 
@@ -199,6 +228,9 @@ struct GrpcTransport(ReadinessStream):
         if self._tls:
             self._tls.value().set_read_timeout(nanos)
             return
+        if self._unix:
+            self._unix.value().set_read_timeout(nanos)
+            return
         self._tcp.value().set_read_timeout(nanos)
 
     def set_nodelay(self, enabled: Bool) raises:
@@ -213,12 +245,18 @@ struct GrpcTransport(ReadinessStream):
         if self._tls:
             self._tls.value().set_nodelay(enabled)
             return
+        if self._unix:
+            self._unix.value().set_nodelay(enabled)
+            return
         self._tcp.value().set_nodelay(enabled)
 
     def close(mut self):
         """Closes the active stream; safe to call more than once."""
         if self._tls:
             self._tls.value().close()
+            return
+        if self._unix:
+            self._unix.value().close()
             return
         if self._tcp:
             self._tcp.value().close()

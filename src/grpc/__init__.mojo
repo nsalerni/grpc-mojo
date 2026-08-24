@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""Pure-Mojo gRPC over HTTP/2, with h2c and TLS transports.
+"""Pure-Mojo gRPC over HTTP/2, with TCP, TLS, and Unix socket transports.
 
 Implements the gRPC wire protocol per
 [PROTOCOL-HTTP2.md](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md):
@@ -17,8 +17,8 @@ length-prefixed message framing, `grpc-timeout` deadlines, custom metadata
 messages, and the `grpc-status-details-bin` rich error model. All four RPC
 kinds are supported: unary, server streaming, client streaming, and
 bidirectional streaming. Conformance is verified against reference
-implementations: the official gRPC interop suite passes 48/48 cases against
-grpcio across both roles and both transports, the h2 layer passes h2spec
+implementations: the official gRPC interop suite passes 72/72 cases against
+grpcio across both roles and all three transports, the h2 layer passes h2spec
 146/146, and the proto layer passes Google protobuf conformance 698/698.
 
 The package depends on the `h2`, `proto`, `hpack`, `net`, and `tls` packages

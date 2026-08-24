@@ -136,6 +136,66 @@
     },
     {
       "case": "empty_unary",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "empty_unary",
       "direction": "grpcio-client-h2c",
       "passed": true
     },
@@ -252,6 +312,66 @@
     {
       "case": "cancel_after_begin",
       "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "empty_unary",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "large_unary",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "client_streaming",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "server_streaming",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "ping_pong",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "empty_stream",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "custom_metadata",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "status_code_and_message",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "special_status_message",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "unimplemented_method",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "timeout_on_sleeping_server",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "cancel_after_begin",
+      "direction": "grpcio-client-unix",
       "passed": true
     }
   ],

@@ -20,8 +20,9 @@ Correctness is defined by reference implementations and official suites,
 not our own tests:
 
 - **Official gRPC interop cases**: 12 canonical cases in both directions,
-  over h2c and TLS against `grpcio` (`pixi run interop-official`)
-- **h2spec** (RFC 9113/7541 conformance tool): all 146 checks pass
+  over h2c, TLS, and Unix domain sockets against `grpcio`
+  (`pixi run interop-official`)
+- **h2spec** (RFC 7540/7541 conformance tool): all 146 checks pass
 - **Google protobuf conformance suite**: 698/698 binary wire-format
   tests pass (JSON/proto2/editions declared unsupported, skipped)
 - **Differential compliance** vs Python `protobuf`, python-hpack,
@@ -142,6 +143,20 @@ def main() raises:
     req.message = "hello"
     print(client.say(req, timeout_ns=10_000_000_000).message)
 ```
+
+Local services can use a Unix domain socket instead of a TCP port. The
+client sends `localhost` as `:authority` unless the caller supplies another
+value.
+
+```mojo
+var server = Server.unix("/run/my-service/grpc.sock")
+var channel = GrpcChannel.connect_unix("/run/my-service/grpc.sock")
+```
+
+`Server.unix` refuses to replace an existing path by default. Set
+`remove_existing=True` only for a path inside a directory owned by the
+service. The server leaves the socket file in place when it exits, so the
+service owner must remove a stale socket before restarting.
 
 ## Compliance
 
