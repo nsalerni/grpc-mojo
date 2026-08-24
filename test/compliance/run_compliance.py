@@ -67,6 +67,10 @@ EXPECTED_GRPC_TLS_CHECKS = (
     "Mojo TLS server: missing grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: trusted identity recovers after rejected handshakes",
+    "Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo",
+    "Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch",
+    "Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch",
+    "Mojo polling TLS server: trusted identity recovers after rejected handshakes",
 )
 
 # Package suites executed and aggregated by this umbrella (in report order).
@@ -376,7 +380,7 @@ def _polling_process_worker(args):
     return True
 
 
-def _start_polling_server(*limits, use_tls=False):
+def _start_polling_server(*limits, use_tls=False, client_ca_file=None):
     command = [
         *MOJO_RUN,
         str(TOOLS / "grpc_polling_server_probe.mojo"),
@@ -386,6 +390,8 @@ def _start_polling_server(*limits, use_tls=False):
         command.extend(
             ["tls", str(CERTS / "server.pem"), str(CERTS / "server.key")]
         )
+        if client_ca_file is not None:
+            command.append(str(client_ca_file))
     proc = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -1342,6 +1348,101 @@ def section_grpc_polling_tls(tmp: Path):
             attacker.close()
         proc.kill()
         proc.wait()
+
+    dispatch_marker = BUILD / "grpc_polling_server_probe_dispatch"
+    dispatch_marker.unlink(missing_ok=True)
+    proc, port = _start_polling_server(
+        *limits, use_tls=True, client_ca_file=CERTS / "ca.pem"
+    )
+
+    def dispatch_count() -> int:
+        if not dispatch_marker.exists():
+            return 0
+        return len(dispatch_marker.read_text().splitlines())
+
+    def secure_echo(credentials, message: str):
+        with grpc.secure_channel(f"localhost:{port}", credentials) as channel:
+            echo = _polling_echo_method(grpc, pb, channel)
+            return echo(pb.EchoRequest(message=message), timeout=30)
+
+    try:
+        trusted_credentials = grpc.ssl_channel_credentials(
+            root_certificates=(CERTS / "ca.pem").read_bytes(),
+            private_key=(CERTS / "client.key").read_bytes(),
+            certificate_chain=(CERTS / "client-chain.pem").read_bytes(),
+        )
+        trusted_message = "p" * 65536
+        response = secure_echo(trusted_credentials, trusted_message)
+        trusted_dispatches = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo",
+            response.message == trusted_message and trusted_dispatches == 1,
+            f"response_size={len(response.message)} "
+            f"handler_calls={trusted_dispatches}",
+        )
+
+        calls_before = dispatch_count()
+        missing_rejected = False
+        try:
+            secure_echo(
+                grpc.ssl_channel_credentials(
+                    root_certificates=(CERTS / "ca.pem").read_bytes()
+                ),
+                "missing",
+            )
+        except grpc.RpcError:
+            missing_rejected = True
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch",
+            missing_rejected and calls_after == calls_before,
+            f"rejected={missing_rejected} handler_calls={calls_after}",
+        )
+
+        calls_before = dispatch_count()
+        untrusted_rejected = False
+        try:
+            secure_echo(
+                grpc.ssl_channel_credentials(
+                    root_certificates=(CERTS / "ca.pem").read_bytes(),
+                    private_key=(CERTS / "untrusted_client.key").read_bytes(),
+                    certificate_chain=(
+                        CERTS / "untrusted_client.pem"
+                    ).read_bytes(),
+                ),
+                "untrusted",
+            )
+        except grpc.RpcError:
+            untrusted_rejected = True
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch",
+            untrusted_rejected and calls_after == calls_before,
+            f"rejected={untrusted_rejected} handler_calls={calls_after}",
+        )
+
+        calls_before = dispatch_count()
+        recovery_message = "trusted after rejected polling handshakes"
+        recovery_matches = False
+        try:
+            response = secure_echo(trusted_credentials, recovery_message)
+            recovery_matches = response.message == recovery_message
+        except grpc.RpcError:
+            pass
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo polling TLS server: trusted identity recovers after rejected handshakes",
+            recovery_matches and calls_after == calls_before + 1,
+            f"response_match={recovery_matches} handler_calls={calls_after}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+        dispatch_marker.unlink(missing_ok=True)
 
 
 def section_grpc_tls(tmp: Path):

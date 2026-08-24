@@ -17,8 +17,8 @@ TLS clients use `GrpcChannel.connect_tls`; TLS servers use `Server.tls`.
 Both require the `h2` ALPN token, and clients verify the certificate chain
 and hostname by default. Clients can also load a PEM certificate chain and
 private key from files when the server requires mutual TLS.
-The blocking `Server.tls` constructor accepts the path to a PEM CA bundle and
-rejects clients without a trusted certificate before request dispatch.
+`Server.tls` and `PollingServer.tls` accept the path to a PEM CA bundle and
+reject clients without a trusted certificate before request dispatch.
 
 Blocking local services can use `GrpcChannel.connect_unix` and `Server.unix`.
 The client uses `localhost` as its default `:authority`. The server refuses
@@ -28,8 +28,9 @@ to replace an existing socket path unless `remove_existing=True`.
 uses `mojo-net` readiness polling to progress bounded I/O and TLS handshakes
 across many connections on one thread. Its connection, handshake, accept,
 inactivity, incomplete-request, read, frame, write, message, and output limits
-are explicit. TLS requires the `h2` ALPN token. Handlers execute serially, and
-streaming methods remain on `Server`.
+are explicit. TLS requires the `h2` ALPN token and can authenticate client
+certificates during its non-blocking handshake. Handlers execute serially,
+and streaming methods remain on `Server`.
 
 Verification: the 12 canonical gRPC interop cases pass in both directions
 over h2c, TLS, and Unix domain sockets against `grpcio`

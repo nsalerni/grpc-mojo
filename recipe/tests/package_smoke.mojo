@@ -3,6 +3,8 @@ from std.testing import assert_equal, assert_true
 from grpc import (
     GrpcChannel,
     Metadata,
+    PollingServer,
+    PollingServerConfig,
     Server,
     Status,
     StatusCode,
@@ -59,6 +61,19 @@ def _check_server_identity_api() raises:
         443,
         "server-chain.pem",
         "server.key",
+        client_ca_file="client-ca.pem",
+        require_client_cert=True,
+    )
+
+
+def _check_polling_server_identity_api() raises:
+    """Type-checks polling server client authentication without binding."""
+    _ = PollingServer.tls(
+        "127.0.0.1",
+        443,
+        "server-chain.pem",
+        "server.key",
+        PollingServerConfig(),
         client_ca_file="client-ca.pem",
         require_client_cert=True,
     )

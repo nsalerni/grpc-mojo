@@ -127,8 +127,9 @@ server.serve()
 
 Use `PollingServer.tls` with a PEM certificate chain and key for secure unary
 services. It performs non-blocking handshakes, accepts only the `h2` ALPN
-token, and uses one certificate chain for all clients. Client certificate
-authentication and SNI-based certificate selection are not yet supported.
+token, and uses one certificate chain for all clients. It can reject clients
+without a certificate from a configured client CA before HTTP/2 dispatch.
+SNI-based certificate selection is not yet supported.
 The runnable [TLS polling example](examples/polling_tls_server.mojo) exposes
 the handshake and output limits used by a typical service.
 
@@ -159,15 +160,17 @@ var channel = GrpcChannel.connect_tls(
 )
 ```
 
-The blocking server can require a client certificate that chains to a trusted
-CA. Pass the path to a PEM CA bundle. Both options are required together.
+Both TLS server constructors can require a client certificate that chains to
+a trusted CA. Pass the path to a PEM CA bundle. Both options are required
+together. This polling server keeps handshake work and admission bounded.
 
 ```mojo
-var server = Server.tls(
+var server = PollingServer.tls(
     "127.0.0.1",
     50051,
     "server-chain.pem",
     "server.key",
+    PollingServerConfig(),
     client_ca_file="client-ca.pem",
     require_client_cert=True,
 )

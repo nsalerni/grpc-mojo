@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added optional client CA verification to `PollingServer.tls` with bounded
+  non-blocking handshakes and rejection before request dispatch.
 - Added optional client CA verification to `Server.tls` for services that
   require a trusted client certificate before request dispatch.
 - Added optional client certificate chain and private key file paths to
