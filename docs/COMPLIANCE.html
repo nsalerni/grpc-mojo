@@ -85,7 +85,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">204/204</span><span>checks passed</span><span class="when">2026-08-24 07:25 UTC</span></div>
+<div class="verdict"><span class="score">208/208</span><span>checks passed</span><span class="when">2026-08-24 13:37 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
@@ -94,7 +94,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <li>net <span class="n">11/11</span></li>
 <li>tls <span class="n">30/30</span></li>
 <li>grpc <span class="n">23/23</span></li>
-<li>grpc-tls <span class="n">6/6</span></li>
+<li>grpc-tls <span class="n">10/10</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
 <li>grpc-polling <span class="n">11/11</span></li>
 <li>grpc-polling-tls <span class="n">5/5</span></li>
@@ -237,7 +237,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc over TLS</span> <span class="vs">vs</span> grpcio</h2>
-<p class="method">TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo.</p>
+<p class="method">TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client and server identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>Mojo TLS client: 64 KiB unary echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -246,6 +246,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>Mojo client certificate: missing identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo client certificate: untrusted identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio TLS client: unary echo via Mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: trusted grpcio identity completes a 64 KiB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: missing grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: trusted identity recovers after rejected handshakes</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">GrpcTransport</span> <span class="vs">vs</span> CPython sockets and ssl</h2>

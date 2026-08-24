@@ -159,6 +159,20 @@ var channel = GrpcChannel.connect_tls(
 )
 ```
 
+The blocking server can require a client certificate that chains to a trusted
+CA. Pass the path to a PEM CA bundle. Both options are required together.
+
+```mojo
+var server = Server.tls(
+    "127.0.0.1",
+    50051,
+    "server-chain.pem",
+    "server.key",
+    client_ca_file="client-ca.pem",
+    require_client_cert=True,
+)
+```
+
 Local services can use a Unix domain socket instead of a TCP port. The
 client sends `localhost` as `:authority` unless the caller supplies another
 value.
