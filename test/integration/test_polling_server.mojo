@@ -151,6 +151,8 @@ def test_config_and_registration() raises:
         "build/certs/server.pem",
         "build/certs/server.key",
         config,
+        client_ca_file="build/certs/ca.pem",
+        require_client_cert=True,
     )
     tls_server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
 

@@ -7,6 +7,9 @@ from grpc import PollingServer, PollingServerConfig, ServerContext
 
 
 def echo(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
+    var marker = open("build/grpc_polling_server_probe_dispatch", "a")
+    marker.write_all("echo\n".as_bytes())
+    marker.close()
     var resp = EchoResponse()
     resp.message = req.message.copy()
     return resp^
@@ -64,12 +67,25 @@ def main() raises:
     )
     var server: PollingServer
     if len(args) > 8:
-        if len(args) != 11 or args[8] != "tls":
+        if (len(args) != 11 and len(args) != 12) or args[8] != "tls":
             raise Error(
                 "usage: grpc_polling_server_probe [six limits] "
-                "[handshake_ms] [tls cert key]"
+                "[handshake_ms] [tls cert key [client-ca]]"
             )
-        server = PollingServer.tls("127.0.0.1", 0, args[9], args[10], config)
+        if len(args) == 12:
+            server = PollingServer.tls(
+                "127.0.0.1",
+                0,
+                args[9],
+                args[10],
+                config,
+                client_ca_file=args[11],
+                require_client_cert=True,
+            )
+        else:
+            server = PollingServer.tls(
+                "127.0.0.1", 0, args[9], args[10], config
+            )
     else:
         server = PollingServer("127.0.0.1", 0, config)
     server.register_unary[echo]("/probe.Probe/Echo")

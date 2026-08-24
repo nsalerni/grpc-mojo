@@ -513,12 +513,14 @@ struct PollingServer(Movable):
         cert_chain_pem: String,
         key_pem: String,
         config: PollingServerConfig = PollingServerConfig(),
+        *,
+        client_ca_file: String = "",
+        require_client_cert: Bool = False,
     ) raises -> PollingServer:
         """Constructs a TLS polling server that accepts only `h2` ALPN.
 
-        The server uses one certificate chain for every connection. Client
-        certificate authentication and SNI-based certificate selection are
-        not supported by this constructor.
+        The server uses one certificate chain for every connection. It can
+        require a client certificate before HTTP/2 request dispatch.
 
         Args:
             host: Host or address to bind.
@@ -526,6 +528,10 @@ struct PollingServer(Movable):
             cert_chain_pem: Path to the PEM certificate chain.
             key_pem: Path to the matching PEM private key.
             config: Resource, fairness, and timeout limits.
+            client_ca_file: Path to a PEM bundle of client trust anchors.
+                Must be paired with `require_client_cert=True`.
+            require_client_cert: Require and verify a client certificate
+                against `client_ca_file` before HTTP/2 dispatch.
 
         Returns:
             A polling server configured for TLS.
@@ -535,7 +541,11 @@ struct PollingServer(Movable):
         """
         var out = PollingServer(host, port, config)
         out._tls_context = TLSContext.server(
-            cert_chain_pem, key_pem, alpn=[String(H2_ALPN)]
+            cert_chain_pem,
+            key_pem,
+            alpn=[String(H2_ALPN)],
+            client_ca_file=client_ca_file,
+            require_client_cert=require_client_cert,
         )
         return out^
 
