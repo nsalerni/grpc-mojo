@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added optional client CA verification to `Server.tls` for services that
+  require a trusted client certificate before request dispatch.
 - Added optional client certificate chain and private key file paths to
   `GrpcChannel.connect_tls` for services that require mutual TLS.
 - Added blocking gRPC clients and servers over Unix domain sockets.

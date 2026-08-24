@@ -413,6 +413,9 @@ struct Server(Movable):
         port: UInt16,
         cert_chain_pem: String,
         key_pem: String,
+        *,
+        client_ca_file: String = "",
+        require_client_cert: Bool = False,
     ) raises -> Server:
         """Constructs a TLS server that accepts only `h2` with ALPN.
 
@@ -421,6 +424,10 @@ struct Server(Movable):
             port: TCP port to bind; 0 picks an ephemeral port.
             cert_chain_pem: Path to the PEM certificate chain.
             key_pem: Path to the matching PEM private key.
+            client_ca_file: Path to a PEM bundle of client trust anchors.
+                Must be paired with `require_client_cert=True`.
+            require_client_cert: Require and verify a client certificate
+                against `client_ca_file` before HTTP/2 dispatch.
 
         Returns:
             A server configured for TLS connections.
@@ -430,7 +437,11 @@ struct Server(Movable):
         """
         var out = Server(host, port)
         out._tls_context = TLSContext.server(
-            cert_chain_pem, key_pem, alpn=[String("h2")]
+            cert_chain_pem,
+            key_pem,
+            alpn=[String("h2")],
+            client_ca_file=client_ca_file,
+            require_client_cert=require_client_cert,
         )
         return out^
 

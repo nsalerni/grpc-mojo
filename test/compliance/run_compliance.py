@@ -63,6 +63,10 @@ EXPECTED_GRPC_TLS_CHECKS = (
     "Mojo client certificate: missing identity is rejected before handler dispatch",
     "Mojo client certificate: untrusted identity is rejected before handler dispatch",
     "grpcio TLS client: unary echo via Mojo server",
+    "Mojo TLS server: trusted grpcio identity completes a 64 KiB echo",
+    "Mojo TLS server: missing grpcio identity is rejected before handler dispatch",
+    "Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch",
+    "Mojo TLS server: trusted identity recovers after rejected handshakes",
 )
 
 # Package suites executed and aggregated by this umbrella (in report order).
@@ -1502,6 +1506,116 @@ def section_grpc_tls(tmp: Path):
         proc.kill()
         proc.wait()
 
+    dispatch_marker = BUILD / "grpc_server_probe_dispatch"
+    dispatch_marker.unlink(missing_ok=True)
+    proc = subprocess.Popen(
+        [
+            *MOJO_RUN,
+            str(TOOLS / "grpc_server_probe.mojo"),
+            str(CERTS / "server.pem"),
+            str(CERTS / "server.key"),
+            str(CERTS / "ca.pem"),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        cwd=ROOT,
+    )
+    line = proc.stdout.readline()
+    port = int(line.strip().rsplit(":", 1)[-1])
+
+    def dispatch_count() -> int:
+        if not dispatch_marker.exists():
+            return 0
+        return len(dispatch_marker.read_text().splitlines())
+
+    def secure_echo(credentials, message: str):
+        with grpc.secure_channel(f"localhost:{port}", credentials) as channel:
+            echo = channel.unary_unary(
+                "/probe.Probe/Echo",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            return echo(pb.EchoRequest(message=message), timeout=30)
+
+    try:
+        trusted_credentials = grpc.ssl_channel_credentials(
+            root_certificates=(CERTS / "ca.pem").read_bytes(),
+            private_key=(CERTS / "client.key").read_bytes(),
+            certificate_chain=(CERTS / "client-chain.pem").read_bytes(),
+        )
+        trusted_message = "m" * 65536
+        response = secure_echo(trusted_credentials, trusted_message)
+        trusted_dispatches = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo TLS server: trusted grpcio identity completes a 64 KiB echo",
+            response.message == trusted_message and trusted_dispatches == 1,
+            f"response_size={len(response.message)} "
+            f"handler_calls={trusted_dispatches}",
+        )
+
+        calls_before = dispatch_count()
+        missing_rejected = False
+        try:
+            secure_echo(
+                grpc.ssl_channel_credentials(
+                    root_certificates=(CERTS / "ca.pem").read_bytes()
+                ),
+                "missing",
+            )
+        except grpc.RpcError:
+            missing_rejected = True
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo TLS server: missing grpcio identity is rejected before handler dispatch",
+            missing_rejected and calls_after == calls_before,
+            f"rejected={missing_rejected} handler_calls={calls_after}",
+        )
+
+        calls_before = dispatch_count()
+        untrusted_rejected = False
+        try:
+            secure_echo(
+                grpc.ssl_channel_credentials(
+                    root_certificates=(CERTS / "ca.pem").read_bytes(),
+                    private_key=(CERTS / "untrusted_client.key").read_bytes(),
+                    certificate_chain=(
+                        CERTS / "untrusted_client.pem"
+                    ).read_bytes(),
+                ),
+                "untrusted",
+            )
+        except grpc.RpcError:
+            untrusted_rejected = True
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch",
+            untrusted_rejected and calls_after == calls_before,
+            f"rejected={untrusted_rejected} handler_calls={calls_after}",
+        )
+
+        calls_before = dispatch_count()
+        recovery_message = "trusted after rejection"
+        recovery_matches = False
+        try:
+            response = secure_echo(trusted_credentials, recovery_message)
+            recovery_matches = response.message == recovery_message
+        except grpc.RpcError:
+            pass
+        calls_after = dispatch_count()
+        record(
+            "grpc-tls",
+            "Mojo TLS server: trusted identity recovers after rejected handshakes",
+            recovery_matches and calls_after == calls_before + 1,
+            f"response_match={recovery_matches} handler_calls={calls_after}",
+        )
+    finally:
+        proc.kill()
+        proc.wait()
+        dispatch_marker.unlink(missing_ok=True)
+
 
 # ---------------------------------------------------------------- units ---
 
@@ -1623,7 +1737,7 @@ SECTION_TITLES = {
     "grpc": ("`grpc` vs grpcio",
              "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
     "grpc-tls": ("`grpc` over TLS vs grpcio",
-                 "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo."),
+                 "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client and server identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo."),
     "grpc-transport": ("`GrpcTransport` vs CPython sockets and ssl",
                        "The readiness wrapper transfers a large payload through CPython TCP and TLS peers with partial reads, partial writes, and would-block handling. TLS retries preserve the direction reported by OpenSSL across same-operation retries."),
     "grpc-polling": ("`PollingServer` with grpcio and hyper-h2 external peers",

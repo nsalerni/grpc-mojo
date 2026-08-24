@@ -3,6 +3,7 @@ from std.testing import assert_equal, assert_true
 from grpc import (
     GrpcChannel,
     Metadata,
+    Server,
     Status,
     StatusCode,
     decode_timeout,
@@ -48,6 +49,18 @@ def _check_client_identity_api() raises:
         443,
         cert_chain_pem="client-chain.pem",
         key_pem="client.key",
+    )
+
+
+def _check_server_identity_api() raises:
+    """Type-checks required client authentication without binding."""
+    _ = Server.tls(
+        "127.0.0.1",
+        443,
+        "server-chain.pem",
+        "server.key",
+        client_ca_file="client-ca.pem",
+        require_client_cert=True,
     )
 
 

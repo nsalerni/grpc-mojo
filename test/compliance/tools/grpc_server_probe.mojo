@@ -15,6 +15,9 @@ from grpc import Server, ServerContext
 
 
 def echo(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
+    var marker = open("build/grpc_server_probe_dispatch", "a")
+    marker.write_all("echo\n".as_bytes())
+    marker.close()
     var resp = EchoResponse()
     resp.message = req.message.copy()
     return resp^
@@ -57,7 +60,16 @@ def fail_rich(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
 def main() raises:
     var args = argv()
     var server: Server
-    if len(args) >= 3:
+    if len(args) >= 4:
+        server = Server.tls(
+            "127.0.0.1",
+            0,
+            args[1],
+            args[2],
+            client_ca_file=args[3],
+            require_client_cert=True,
+        )
+    elif len(args) >= 3:
         server = Server.tls("127.0.0.1", 0, args[1], args[2])
     else:
         server = Server("127.0.0.1", 0)
