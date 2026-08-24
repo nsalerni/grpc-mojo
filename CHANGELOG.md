@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added optional client certificate chain and private key file paths to
+  `GrpcChannel.connect_tls` for services that require mutual TLS.
 - Added blocking gRPC clients and servers over Unix domain sockets.
 - Expanded the official grpcio interop matrix to cover all 12 cases in both
   roles over Unix sockets, alongside h2c and TLS.

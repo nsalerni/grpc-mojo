@@ -2,6 +2,7 @@ context:
   version: "0.2.2"
   mojo_version: ">=1.0.0,<1.1.0"
   family_version: ">=0.2.0,<0.3.0"
+  tls_version: ">=0.2.4,<0.3.0"
 
 package:
   name: grpc-mojo
@@ -28,13 +29,13 @@ requirements:
     - mojo-compiler ${{ mojo_version }}
     - mojo-http2 ${{ family_version }}
     - mojo-net ${{ family_version }}
-    - mojo-tls ${{ family_version }}
+    - mojo-tls ${{ tls_version }}
     - protomojo ${{ family_version }}
   run:
     - mojo-compiler ${{ mojo_version }}
     - mojo-http2 ${{ family_version }}
     - mojo-net ${{ family_version }}
-    - mojo-tls ${{ family_version }}
+    - mojo-tls ${{ tls_version }}
     - protomojo ${{ family_version }}
 
 tests:
