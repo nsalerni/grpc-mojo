@@ -85,14 +85,14 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">302/302</span><span>checks passed</span><span class="when">2026-08-25 21:50 UTC</span></div>
+<div class="verdict"><span class="score">304/304</span><span>checks passed</span><span class="when">2026-08-25 23:27 UTC</span></div>
 <p class="thesis">No self-grading: protobuf binary and JSON behavior is judged by Python <code>protobuf</code> and Google&rsquo;s official conformance runner, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">92/92</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
-<li>tls <span class="n">30/30</span></li>
+<li>tls <span class="n">32/32</span></li>
 <li>grpc <span class="n">24/24</span></li>
 <li>grpc-tls <span class="n">16/16</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
@@ -262,10 +262,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>mojo client vs CPython server: TLSv1.3, ALPN h2, 256KB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo client copies the verified CPython server leaf under TLS 1.3</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo client copies the verified CPython server leaf under TLS 1.2</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo server copies the verified CPython client leaf under TLS 1.3</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo server copies the verified CPython client leaf under TLS 1.2</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo client copies the verified CPython server leaf and typed SANs under TLS 1.3</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo client copies the verified CPython server leaf and typed SANs under TLS 1.2</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo server copies the verified CPython client leaf and typed SANs under TLS 1.3</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo server copies the verified CPython client leaf and typed SANs under TLS 1.2</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo server reports no peer certificate when CPython sends none</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo does not mark a CPython certificate verified when verification is disabled</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>nonblocking Mojo client presents a trusted certificate chain to CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -289,6 +289,8 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>partial Mojo TLS writes match CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>partial Mojo TLS reads preserve WANT_READ against CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS write preserves WANT_WRITE under CPython backpressure</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>clean close_notify returns EOF in Mojo and CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>truncated TLS transport is rejected by Mojo and CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>fatal session teardown does not contaminate the next nonblocking TLS session</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>reset peers with rejected ALPN do not terminate the server</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
@@ -328,7 +330,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo polling TLS server: handler receives the exact verified grpcio client leaf</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo polling TLS server: handler receives the verified grpcio client leaf and typed subject alternative names</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: trusted identity recovers after rejected handshakes</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -339,7 +341,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>Mojo client certificate: untrusted identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio TLS client: unary echo via Mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: trusted grpcio identity completes a 64 KiB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Mojo TLS server: handler receives the exact verified grpcio client leaf</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: handler receives the verified grpcio client leaf and typed subject alternative names</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: missing grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: trusted identity recovers after rejected handshakes</td><td class="result"><span class="pass">PASS</span></td></tr>

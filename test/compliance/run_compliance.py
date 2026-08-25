@@ -64,12 +64,12 @@ EXPECTED_GRPC_TLS_CHECKS = (
     "Mojo client certificate: untrusted identity is rejected before handler dispatch",
     "grpcio TLS client: unary echo via Mojo server",
     "Mojo TLS server: trusted grpcio identity completes a 64 KiB echo",
-    "Mojo TLS server: handler receives the exact verified grpcio client leaf",
+    "Mojo TLS server: handler receives the verified grpcio client leaf and typed subject alternative names",
     "Mojo TLS server: missing grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: trusted identity recovers after rejected handshakes",
     "Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo",
-    "Mojo polling TLS server: handler receives the exact verified grpcio client leaf",
+    "Mojo polling TLS server: handler receives the verified grpcio client leaf and typed subject alternative names",
     "Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch",
     "Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch",
     "Mojo polling TLS server: trusted identity recovers after rejected handshakes",
@@ -1423,9 +1423,16 @@ def section_grpc_polling_tls(tmp: Path):
             f"handler_calls={trusted_dispatches}",
         )
 
-        expected_identity = "verified:" + ssl.PEM_cert_to_DER_cert(
-            (CERTS / "client.pem").read_text()
-        ).hex()
+        expected_identity = (
+            "verified:"
+            + ssl.PEM_cert_to_DER_cert(
+                (CERTS / "client.pem").read_text()
+            ).hex()
+            + "|dns=client.example.test"
+            + "|uri=spiffe://example.test/client"
+            + "|email=client@example.test"
+            + "|ip=192.0.2.44,2001:db8::44"
+        )
         with grpc.secure_channel(
             f"localhost:{port}", trusted_credentials
         ) as channel:
@@ -1436,7 +1443,7 @@ def section_grpc_polling_tls(tmp: Path):
             ]
         record(
             "grpc-tls",
-            "Mojo polling TLS server: handler receives the exact verified grpcio client leaf",
+            "Mojo polling TLS server: handler receives the verified grpcio client leaf and typed subject alternative names",
             peer_responses == [expected_identity, expected_identity],
             f"calls={len(peer_responses)} exact="
             f"{peer_responses == [expected_identity, expected_identity]}",
@@ -1715,9 +1722,16 @@ def section_grpc_tls(tmp: Path):
             f"handler_calls={trusted_dispatches}",
         )
 
-        expected_identity = "verified:" + ssl.PEM_cert_to_DER_cert(
-            (CERTS / "client.pem").read_text()
-        ).hex()
+        expected_identity = (
+            "verified:"
+            + ssl.PEM_cert_to_DER_cert(
+                (CERTS / "client.pem").read_text()
+            ).hex()
+            + "|dns=client.example.test"
+            + "|uri=spiffe://example.test/client"
+            + "|email=client@example.test"
+            + "|ip=192.0.2.44,2001:db8::44"
+        )
         with grpc.secure_channel(
             f"localhost:{port}", trusted_credentials
         ) as channel:
@@ -1732,7 +1746,7 @@ def section_grpc_tls(tmp: Path):
             ]
         record(
             "grpc-tls",
-            "Mojo TLS server: handler receives the exact verified grpcio client leaf",
+            "Mojo TLS server: handler receives the verified grpcio client leaf and typed subject alternative names",
             peer_responses == [expected_identity, expected_identity],
             f"calls={len(peer_responses)} exact="
             f"{peer_responses == [expected_identity, expected_identity]}",

@@ -78,8 +78,9 @@ struct ServerContext(Movable):
     var peer_certificate: Optional[PeerCertificate]
     """Owned peer leaf certificate for mutual TLS calls, otherwise None.
 
-    The snapshot remains valid after the connection closes. Check
-    `PeerCertificate.verified` before using it for authorization.
+    The snapshot includes typed subject alternative names and remains valid
+    after the connection closes. Check `PeerCertificate.verified` before
+    using it for authorization.
     """
     var response_metadata: Metadata
     """Custom metadata the handler wants in the initial response headers."""

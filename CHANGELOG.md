@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Updated the source and package dependencies to mojo-http2 v0.2.5 and
+  mojo-tls v0.3.0. Authenticated handlers can inspect copied DNS, URI, email,
+  and canonical IP subject alternative names through
+  `ServerContext.peer_certificate`.
 - Updated the source and package dependency to protomojo v0.3.0. The
   aggregated protobuf section now includes 1476 passing official proto3
   binary and JSON cases.

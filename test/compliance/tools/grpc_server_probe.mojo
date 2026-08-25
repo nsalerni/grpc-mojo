@@ -41,7 +41,20 @@ def peer_certificate(
     var prefix = String("unverified:")
     if peer.verified:
         prefix = String("verified:")
-    resp.message = prefix + to_hex(Span(peer.leaf_der))
+    resp.message = (
+        prefix
+        + to_hex(Span(peer.leaf_der))
+        + "|dns="
+        + peer.subject_alt_names.dns_names[0]
+        + "|uri="
+        + peer.subject_alt_names.uri_names[0]
+        + "|email="
+        + peer.subject_alt_names.email_addresses[0]
+        + "|ip="
+        + peer.subject_alt_names.ip_addresses[0]
+        + ","
+        + peer.subject_alt_names.ip_addresses[1]
+    )
     return resp^
 
 
