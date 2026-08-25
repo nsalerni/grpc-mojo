@@ -2,6 +2,7 @@
 
 from std.sys import argv
 
+from common import to_hex
 from echo_pb import EchoRequest, EchoResponse
 from grpc import PollingServer, PollingServerConfig, ServerContext
 
@@ -17,6 +18,21 @@ def echo(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
 
 def fail(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
     raise Error("polling handler failed")
+
+
+def peer_certificate(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    var resp = EchoResponse()
+    if not ctx.peer_certificate:
+        resp.message = String("none")
+        return resp^
+    var peer = ctx.peer_certificate.value().copy()
+    var prefix = String("unverified:")
+    if peer.verified:
+        prefix = String("verified:")
+    resp.message = prefix + to_hex(Span(peer.leaf_der))
+    return resp^
 
 
 def large(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
@@ -89,6 +105,7 @@ def main() raises:
     else:
         server = PollingServer("127.0.0.1", 0, config)
     server.register_unary[echo]("/probe.Probe/Echo")
+    server.register_unary[peer_certificate]("/probe.Probe/PeerCertificate")
     server.register_unary[fail]("/probe.Probe/Fail")
     server.register_unary[large]("/probe.Probe/Large")
     server.register_unary[metadata]("/probe.Probe/Metadata")

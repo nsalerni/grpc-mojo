@@ -10,6 +10,7 @@
 
 from std.sys import argv
 
+from common import to_hex
 from echo_pb import EchoRequest, EchoResponse
 from grpc import Server, ServerContext
 
@@ -26,6 +27,21 @@ def echo(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
 def timeout(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
     var resp = EchoResponse()
     resp.message = String(ctx.timeout_ns)
+    return resp^
+
+
+def peer_certificate(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    var resp = EchoResponse()
+    if not ctx.peer_certificate:
+        resp.message = String("none")
+        return resp^
+    var peer = ctx.peer_certificate.value().copy()
+    var prefix = String("unverified:")
+    if peer.verified:
+        prefix = String("verified:")
+    resp.message = prefix + to_hex(Span(peer.leaf_der))
     return resp^
 
 
@@ -75,6 +91,7 @@ def main() raises:
         server = Server("127.0.0.1", 0)
     server.register_unary[echo]("/probe.Probe/Echo")
     server.register_unary[timeout]("/probe.Probe/Timeout")
+    server.register_unary[peer_certificate]("/probe.Probe/PeerCertificate")
     server.register_unary[meta_echo]("/probe.Probe/MetaEcho")
     server.register_unary[fail_unicode]("/probe.Probe/FailUnicode")
     server.register_unary[fail_rich]("/probe.Probe/FailRich")

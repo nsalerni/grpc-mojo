@@ -85,7 +85,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">212/212</span><span>checks passed</span><span class="when">2026-08-24 14:05 UTC</span></div>
+<div class="verdict"><span class="score">216/216</span><span>checks passed</span><span class="when">2026-08-24 14:43 UTC</span></div>
 <p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">6/6</span></li>
@@ -93,10 +93,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
 <li>tls <span class="n">30/30</span></li>
-<li>grpc <span class="n">23/23</span></li>
-<li>grpc-tls <span class="n">14/14</span></li>
+<li>grpc <span class="n">24/24</span></li>
+<li>grpc-tls <span class="n">16/16</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
-<li>grpc-polling <span class="n">11/11</span></li>
+<li>grpc-polling <span class="n">12/12</span></li>
 <li>grpc-polling-tls <span class="n">5/5</span></li>
 <li>grpc-official <span class="n">72/72</span></li>
 <li>packaging <span class="n">6/6</span></li>
@@ -225,6 +225,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>client deadline enforced vs sleeping server (300ms -&gt; DEADLINE_EXCEEDED)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client: 1MB echo through mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client: empty message through mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>blocking h2c handler receives no peer certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio deadline decoded by mojo server (3s sent)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client metadata (ascii + -bin) visible in mojo handler</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo server initial response metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -241,6 +242,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo polling TLS server: handler receives the exact verified grpcio client leaf</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo polling TLS server: trusted identity recovers after rejected handshakes</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -251,6 +253,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>Mojo client certificate: untrusted identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio TLS client: unary echo via Mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: trusted grpcio identity completes a 64 KiB echo</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo TLS server: handler receives the exact verified grpcio client leaf</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: missing grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>Mojo TLS server: trusted identity recovers after rejected handshakes</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -271,6 +274,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>16 grpcio processes complete 25 unary calls each while a partial preface stalls</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>1 MiB grpcio unary response completes with a 64 KiB configured output limit</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio observes empty unary, metadata, trailers, and handler UNKNOWN</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>polling h2c handler receives no peer certificate</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>an expired large response with a stalled reader does not spin the loop</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>all four internal gRPC prefix split boundaries complete</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>wire grammar rejects compressed, multiple, and truncated unary input</td><td class="result"><span class="pass">PASS</span></td></tr>

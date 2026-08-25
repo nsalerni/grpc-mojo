@@ -14,7 +14,10 @@ chain and private key from files for a server that requires mutual TLS. TLS
 servers use one configured certificate chain and require ALPN negotiation of
 the `h2` protocol. Both server implementations can require a client
 certificate that chains to a configured client CA before they accept HTTP/2
-requests.
+requests. Handlers can read the owned client leaf snapshot from
+`ServerContext.peer_certificate`. Certificate presence alone is not an
+authorization decision. Check `PeerCertificate.verified`, then apply the
+service's identity policy to the DER certificate.
 
 The HTTP/2 layer limits rapid resets, PING and SETTINGS floods, concurrent
 streams, header sizes, and buffered output. The protobuf decoder enforces the

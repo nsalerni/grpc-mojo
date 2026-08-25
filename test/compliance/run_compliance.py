@@ -64,10 +64,12 @@ EXPECTED_GRPC_TLS_CHECKS = (
     "Mojo client certificate: untrusted identity is rejected before handler dispatch",
     "grpcio TLS client: unary echo via Mojo server",
     "Mojo TLS server: trusted grpcio identity completes a 64 KiB echo",
+    "Mojo TLS server: handler receives the exact verified grpcio client leaf",
     "Mojo TLS server: missing grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: untrusted grpcio identity is rejected before handler dispatch",
     "Mojo TLS server: trusted identity recovers after rejected handshakes",
     "Mojo polling TLS server: trusted grpcio identity completes a 64 KiB echo",
+    "Mojo polling TLS server: handler receives the exact verified grpcio client leaf",
     "Mojo polling TLS server: missing grpcio identity is rejected before handler dispatch",
     "Mojo polling TLS server: untrusted grpcio identity is rejected before handler dispatch",
     "Mojo polling TLS server: trusted identity recovers after rejected handshakes",
@@ -675,6 +677,16 @@ def section_grpc_server(tmp: Path):
         resp = method("Echo")(pb.EchoRequest(message=""), timeout=10)
         record("grpc", "grpcio client: empty message through mojo server", resp.message == "", "")
 
+        resp = method("PeerCertificate")(
+            pb.EchoRequest(message="identity"), timeout=10
+        )
+        record(
+            "grpc",
+            "blocking h2c handler receives no peer certificate",
+            resp.message == "none",
+            resp.message,
+        )
+
         resp = method("Timeout")(pb.EchoRequest(message="t"), timeout=3.0)
         ns = int(resp.message)
         # grpcio may round the wire timeout up slightly; allow 5% headroom.
@@ -807,6 +819,17 @@ def section_grpc_polling_server(tmp: Path):
                 "grpcio observes empty unary, metadata, trailers, and handler UNKNOWN",
                 supported_ok,
                 f"initial={initial} trailing={trailing} unknown={unknown}",
+            )
+
+            peer = _polling_peer_method(grpc, pb, channel)
+            peer_response = peer(
+                pb.EchoRequest(message="identity"), timeout=10
+            )
+            record(
+                "grpc-polling",
+                "polling h2c handler receives no peer certificate",
+                peer_response.message == "none",
+                peer_response.message,
             )
 
         stalled_output = _RawH2GrpcClient(
@@ -1167,6 +1190,14 @@ def _polling_echo_method(grpc, pb, channel):
     )
 
 
+def _polling_peer_method(grpc, pb, channel):
+    return channel.unary_unary(
+        "/probe.Probe/PeerCertificate",
+        request_serializer=pb.EchoRequest.SerializeToString,
+        response_deserializer=pb.EchoResponse.FromString,
+    )
+
+
 def section_grpc_polling_tls(tmp: Path):
     """Judge PollingServer TLS with grpcio and CPython ssl peers."""
     print("== grpc polling server TLS with grpcio and CPython ssl peers ==")
@@ -1380,6 +1411,25 @@ def section_grpc_polling_tls(tmp: Path):
             response.message == trusted_message and trusted_dispatches == 1,
             f"response_size={len(response.message)} "
             f"handler_calls={trusted_dispatches}",
+        )
+
+        expected_identity = "verified:" + ssl.PEM_cert_to_DER_cert(
+            (CERTS / "client.pem").read_text()
+        ).hex()
+        with grpc.secure_channel(
+            f"localhost:{port}", trusted_credentials
+        ) as channel:
+            peer = _polling_peer_method(grpc, pb, channel)
+            peer_responses = [
+                peer(pb.EchoRequest(message=str(index)), timeout=30).message
+                for index in range(2)
+            ]
+        record(
+            "grpc-tls",
+            "Mojo polling TLS server: handler receives the exact verified grpcio client leaf",
+            peer_responses == [expected_identity, expected_identity],
+            f"calls={len(peer_responses)} exact="
+            f"{peer_responses == [expected_identity, expected_identity]}",
         )
 
         calls_before = dispatch_count()
@@ -1653,6 +1703,29 @@ def section_grpc_tls(tmp: Path):
             response.message == trusted_message and trusted_dispatches == 1,
             f"response_size={len(response.message)} "
             f"handler_calls={trusted_dispatches}",
+        )
+
+        expected_identity = "verified:" + ssl.PEM_cert_to_DER_cert(
+            (CERTS / "client.pem").read_text()
+        ).hex()
+        with grpc.secure_channel(
+            f"localhost:{port}", trusted_credentials
+        ) as channel:
+            peer = channel.unary_unary(
+                "/probe.Probe/PeerCertificate",
+                request_serializer=pb.EchoRequest.SerializeToString,
+                response_deserializer=pb.EchoResponse.FromString,
+            )
+            peer_responses = [
+                peer(pb.EchoRequest(message=str(index)), timeout=30).message
+                for index in range(2)
+            ]
+        record(
+            "grpc-tls",
+            "Mojo TLS server: handler receives the exact verified grpcio client leaf",
+            peer_responses == [expected_identity, expected_identity],
+            f"calls={len(peer_responses)} exact="
+            f"{peer_responses == [expected_identity, expected_identity]}",
         )
 
         calls_before = dispatch_count()

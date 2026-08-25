@@ -38,7 +38,7 @@ from hpack import HeaderField
 from h2 import H2_ALPN, Http2Connection, get_u32_be
 from net import PollEvent, Poller, TCPListener, is_would_block
 from proto import ProtoMessage, decode, encode
-from tls import TLSContext, TLSHandshake
+from tls import PeerCertificate, TLSContext, TLSHandshake
 
 from .framing import GRPC_MESSAGE_PREFIX_LEN, frame_message
 from .metadata import Metadata, encode_bin_value
@@ -269,18 +269,24 @@ struct _PollingHandshake(Movable):
     def remaining(self, now_ns: Int64, timeout_ms: Int) -> Int64:
         return Int64(timeout_ms) * 1_000_000 - (now_ns - self.accepted_ns)
 
-    def finish(deinit self) raises -> GrpcTransport:
+    def finish(
+        deinit self, config: PollingServerConfig
+    ) raises -> _PollingConnection:
         var tls = self.tls^.finish()
         if tls.negotiated_alpn() != H2_ALPN:
             tls.close()
             raise Error("grpc: TLS peer did not negotiate h2 ALPN")
-        return GrpcTransport.secure(tls^)
+        var peer_certificate = tls.peer_certificate()
+        return _PollingConnection(
+            GrpcTransport.secure(tls^), config, peer_certificate^
+        )
 
 
 struct _PollingConnection(Movable):
     """All mutable protocol and application state for one descriptor."""
 
     var h2: Http2Connection[GrpcTransport]
+    var peer_certificate: Optional[PeerCertificate]
     var accepted_ns: Int64
     var last_activity_ns: Int64
     var served_request: Bool
@@ -309,9 +315,13 @@ struct _PollingConnection(Movable):
     var io_blocked_read: Bool
 
     def __init__(
-        out self, var transport: GrpcTransport, config: PollingServerConfig
+        out self,
+        var transport: GrpcTransport,
+        config: PollingServerConfig,
+        var peer_certificate: Optional[PeerCertificate] = None,
     ) raises:
         self.h2 = Http2Connection(transport^, is_client=False)
+        self.peer_certificate = peer_certificate^
         self.accepted_ns = Int64(monotonic())
         self.last_activity_ns = self.accepted_ns
         self.served_request = False
@@ -320,7 +330,7 @@ struct _PollingConnection(Movable):
         self.output = _PendingWrite()
         self.active_sid = 0
         self.call_start_ns = 0
-        self.ctx = ServerContext()
+        self.ctx = ServerContext(self.peer_certificate)
         self.prefix = List[Byte]()
         self.request = List[Byte]()
         self.request_length = -1
@@ -381,7 +391,7 @@ struct _PollingConnection(Movable):
         self.served_request = True
         self.active_sid = 0
         self.call_start_ns = 0
-        self.ctx = ServerContext()
+        self.ctx = ServerContext(self.peer_certificate)
         self.prefix = List[Byte]()
         self.request = List[Byte]()
         self.request_length = -1
@@ -626,7 +636,7 @@ struct PollingServer(Movable):
         var headers = connection.h2.streams[sid].headers.copy()
         connection.active_sid = sid
         connection.call_start_ns = Int64(monotonic())
-        connection.ctx = ServerContext()
+        connection.ctx = ServerContext(connection.peer_certificate)
 
         var method = _find_header(Span(headers), ":method")
         if not method or method.value() != "POST":
@@ -1204,9 +1214,8 @@ struct PollingServer(Movable):
                         if event.readable or event.writable:
                             if handshake.tls.advance():
                                 try:
-                                    var transport = handshake^.finish()
-                                    var connection = _PollingConnection(
-                                        transport^, self.config
+                                    var connection = handshake^.finish(
+                                        self.config
                                     )
                                     # Consume plaintext already buffered by
                                     # libssl before waiting on the kernel again.
@@ -1431,9 +1440,8 @@ struct PollingServer(Movable):
                                 var fd = handshake.tls.descriptor()
                                 if handshake.tls.advance():
                                     try:
-                                        var transport = handshake^.finish()
-                                        var connection = _PollingConnection(
-                                            transport^, self.config
+                                        var connection = handshake^.finish(
+                                            self.config
                                         )
                                         poller.register(
                                             fd, readable=True, writable=False
