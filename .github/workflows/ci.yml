@@ -6,7 +6,38 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  grpc-framing-compatibility:
+    name: gRPC framing compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+        with:
+          pixi-version: latest
+          cache: true
+          cache-write: false
+          post-cleanup: true
+
+      - name: Fetch source dependencies
+        run: python3 tools/fetch_deps.py
+
+      - name: Run deterministic gRPC framing checks
+        run: pixi run grpc-framing-compatibility-smoke
+
+      - name: Upload the first gRPC framing mismatch
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grpc-framing-mismatch
+          path: build/grpc-framing-mismatch.json
+          if-no-files-found: ignore
+
   test:
     name: test (${{ matrix.os }})
     strategy:
