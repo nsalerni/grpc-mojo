@@ -3,8 +3,8 @@
 `tools/protoc-gen-mojo` is a standard `protoc` plugin that turns `.proto`
 files into Mojo message structs and gRPC stubs. It is validated by the same
 gates as the runtime: the generated code passes Google's protobuf conformance
-suite (698/698 binary wire-format tests) and drives the official gRPC interop
-cases against `grpcio`.
+suite (1476/1476 proto3 binary and JSON tests) and drives the official gRPC
+interop cases against `grpcio`.
 
 ## Invocation
 
@@ -85,8 +85,10 @@ Handler signatures:
 ## Current limitations
 
 - proto3 only (`syntax = "proto3"`); proto2 and editions are rejected.
-- Binary wire format only — no JSON or text-format mapping.
-- Well-known types generate as plain messages (correct for the binary
-  format); no special helpers for `Timestamp`/`Any` yet.
+- Generated messages whose complete field graph supports the proto3 JSON
+  mapping implement `ProtoJsonMessage`. Text format remains unsupported.
+- Well-known types use their standard JSON mappings. Protoc requests that
+  contain `google.protobuf.Any` also emit a static resolver for the generated
+  message set.
 - Field and message names colliding with Mojo keywords get a trailing
   underscore.

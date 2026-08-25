@@ -17,7 +17,7 @@ example-client = "mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -
 format = "mojo format src/ test/ examples/ packages/"
 gen-hpack = "python3 packages/mojo-http2/tools/gen_hpack_tables.py"
 gen-vectors = "python3 packages/protomojo/tools/gen_proto_vectors.py"
-gen-proto = "python3 -m grpc_tools.protoc -Ipackages/protomojo/test --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=packages/protomojo/test packages/protomojo/test/vectors.proto && python3 -m grpc_tools.protoc -Iexamples --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=examples examples/echo.proto && cp examples/echo_pb.mojo test/echo_pb.mojo"
+gen-proto = "python3 -m grpc_tools.protoc -Iexamples --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=examples examples/echo.proto && cp examples/echo_pb.mojo test/echo_pb.mojo && python3 -m grpc_tools.protoc -Itest/interop/official --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo --mojo_out=test test/interop/official/messages.proto test/interop/official/empty.proto"
 interop = { cmd = "python3 test/interop/run_interop.py", depends-on = ["prepare-tls"] }
 compliance = { cmd = "python3 tools/check_compliance_report.py && python3 test/compliance/run_compliance.py", depends-on = ["prepare-tls"] }
 grpc-framing-compatibility = { cmd = "python3 -B test/compliance/run_grpc_framing_sequences.py", depends-on = ["prepare-tls"] }

@@ -85,10 +85,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">216/216</span><span>checks passed</span><span class="when">2026-08-24 14:43 UTC</span></div>
-<p class="thesis">No self-grading: protobuf bytes are judged by Python <code>protobuf</code>, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
+<div class="verdict"><span class="score">302/302</span><span>checks passed</span><span class="when">2026-08-25 21:50 UTC</span></div>
+<p class="thesis">No self-grading: protobuf binary and JSON behavior is judged by Python <code>protobuf</code> and Google&rsquo;s official conformance runner, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
-<li>proto <span class="n">6/6</span></li>
+<li>proto <span class="n">92/92</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">21/21</span></li>
 <li>net <span class="n">11/11</span></li>
@@ -104,16 +104,102 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <li>h2_tls <span class="n">4/4</span></li>
 </ul></header>
 <section>
-<h2><span class="pkg">proto</span> <span class="vs">vs</span> Python protobuf</h2>
-<p class="method">Randomized differential testing: the reference implementation encodes seeded random messages; grpc-mojo decodes and re-encodes them; the reference parses the result and compares for semantic equality (byte equality where the encoding is deterministic). Malformed inputs must be accepted/rejected in agreement with the reference.</p>
+<h2><span class="pkg">proto</span> <span class="vs">vs</span> Python protobuf and Google's official suite</h2>
+<p class="method">Randomized binary and proto3 JSON checks compare against Python protobuf. Google's conformance runner executes the supported proto3 binary and JSON groups. Malformed inputs must be accepted or rejected in agreement with those references.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>differential decode/re-encode scalars (n=300)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>byte-identical re-encoding scalars (300/300)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>differential decode/re-encode nested (n=150)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>recursion depth limit agrees with protobuf (60 ok, 150 rejected)</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>malformed-input agreement with protobuf (5/5)</td><td class="result"><span class="pass">PASS</span></td></tr>
-<tr><td>Google conformance, binary wire format (698 passed, 0 failed; 2081 skipped = JSON/proto2/editions, declared unsupported)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>malformed-input agreement with protobuf (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, flat primitives (n=300)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, flat primitives (n=300)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, singular nested messages (n=200)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, singular nested messages (n=200)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, repeated primitives and enums (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, repeated primitives and enums (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated accepted-edge agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated rejection agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated unknown enum name handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, repeated messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, repeated messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated message accepted-edge agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated message rejection agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON repeated message unknown field handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, string-key maps (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, string-key maps (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON string-key map accepted-edge agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON string-key map rejection agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON string-key map unknown enum name handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, integer and boolean map keys (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, integer and boolean map keys (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON integer and boolean map key accepted-edge agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON integer and boolean map key rejection agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, message-valued maps (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, message-valued maps (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON message-valued map accepted-edge agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON message-valued map rejection agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON message-valued map unknown field handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, oneof fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, oneof fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON oneof accepted-edge agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON oneof rejection agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON oneof unknown enum name handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, optional fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, optional fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON optional accepted-edge agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON optional rejection agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON optional unknown enum name handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON google.protobuf.Empty direct agreement (4/4)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON google.protobuf.Empty field parse agreement (3/3)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON google.protobuf.Empty field print agreement (2/2)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON google.protobuf.Empty rejection agreement (4/4)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON wrapper direct agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, wrapper fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, wrapper fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON wrapper accepted-edge agreement (12/12)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON wrapper rejection agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Timestamp direct agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, Timestamp fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, Timestamp fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Timestamp accepted-edge agreement (15/15)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Timestamp rejection agreement (14/14)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Duration direct agreement (12/12)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, Duration fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, Duration fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Duration accepted-edge agreement (12/12)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Duration rejection agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON FieldMask direct agreement (11/11)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, FieldMask fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, FieldMask fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON FieldMask accepted-edge agreement (12/12)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON FieldMask rejection agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, recursive messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, recursive messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON recursive accepted-edge agreement (8/8)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON recursive rejection and depth-limit agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, Struct family fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, Struct family fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Struct, Value, and ListValue direct agreement (18/18)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Struct family accepted-edge agreement (17/17)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Struct family rejection agreement (18/18)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, descriptor message fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, descriptor message fields (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON descriptor message accepted-edge agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON descriptor message rejection agreement (10/10)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, Any messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, Any messages (n=200, seed=20260825)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Any accepted-edge agreement (12/12)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON Any rejection agreement (9/9)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON accepted-edge agreement (20/20)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON rejection agreement (31/31)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON parse differential, singular enums (n=200, seed=20260824)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON print differential, singular enums (n=200, seed=20260824)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON enum accepted-edge agreement (7/7)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON enum rejection agreement (6/6)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>proto3 JSON unknown enum name handling</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Google conformance, proto3 binary wire format and JSON (1476 passed, 0 failed; 1303 proto2 cases skipped, declared unsupported)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">hpack</span> <span class="vs">vs</span> python-hpack</h2>
@@ -390,7 +476,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <p class="method">The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td>unit test files (28/28 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>unit test files (30/30 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>interop suite (interop: 7 passed, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
