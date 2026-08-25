@@ -6,6 +6,7 @@ from grpc import (
     PollingServer,
     PollingServerConfig,
     Server,
+    ServerContext,
     Status,
     StatusCode,
     decode_timeout,
@@ -15,7 +16,7 @@ from grpc import (
 )
 from net import resolve
 from proto import ProtoMessage, WireReader, WireWriter, decode, encode
-from tls import TLSContext
+from tls import PeerCertificate, TLSContext
 
 
 struct PackageMessage(Copyable, Defaultable, Movable, ProtoMessage):
@@ -79,6 +80,22 @@ def _check_polling_server_identity_api() raises:
     )
 
 
+def _check_peer_certificate_api() raises:
+    """Type-checks the owned client identity exposed to handlers."""
+    var unauthenticated = ServerContext()
+    assert_true(not unauthenticated.peer_certificate)
+
+    var der: List[Byte] = [0x30, 0x00]
+    var certificate = PeerCertificate(
+        leaf_der=der^, verified=True, matched_name=String()
+    )
+    var peer: Optional[PeerCertificate] = certificate^
+    var authenticated = ServerContext(peer)
+    assert_true(authenticated.peer_certificate)
+    assert_true(authenticated.peer_certificate.value().verified)
+    assert_equal(len(authenticated.peer_certificate.value().leaf_der), 2)
+
+
 def main() raises:
     assert_true(Status.ok().is_ok())
     assert_equal(
@@ -105,4 +122,5 @@ def main() raises:
     assert_equal(addresses[0].port, 443)
 
     _ = TLSContext.client(verify=False, alpn=["h2"])
+    _check_peer_certificate_api()
     print("grpc-mojo package smoke test passed")

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Exposed each authenticated client's owned leaf certificate snapshot through
+  `ServerContext` on blocking and polling servers.
 - Added optional client CA verification to `PollingServer.tls` with bounded
   non-blocking handshakes and rejection before request dispatch.
 - Added optional client CA verification to `Server.tls` for services that

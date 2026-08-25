@@ -39,7 +39,7 @@ from hpack import HeaderField
 from h2 import ERR_NO_ERROR, Http2Connection
 from net import TCPListener, UnixListener
 from proto import ProtoMessage, decode, encode
-from tls import TLSContext
+from tls import PeerCertificate, TLSContext
 
 from .framing import recv_message, send_message
 from .metadata import Metadata, encode_bin_value
@@ -75,6 +75,12 @@ struct ServerContext(Movable):
     """Custom metadata from the request headers."""
     var timeout_ns: Int64
     """0 means no deadline was sent."""
+    var peer_certificate: Optional[PeerCertificate]
+    """Owned peer leaf certificate for mutual TLS calls, otherwise None.
+
+    The snapshot remains valid after the connection closes. Check
+    `PeerCertificate.verified` before using it for authorization.
+    """
     var response_metadata: Metadata
     """Custom metadata the handler wants in the initial response headers."""
     var response_trailers: Metadata
@@ -83,11 +89,19 @@ struct ServerContext(Movable):
     """Set by a handler to end the call with a specific non-OK status
     (the equivalent of grpcio's context.abort)."""
 
-    def __init__(out self):
-        """Constructs an empty context; dispatch fills the request fields."""
+    def __init__(out self, peer_certificate: Optional[PeerCertificate] = None):
+        """Constructs an empty context; dispatch fills the request fields.
+
+        Args:
+            peer_certificate: Connection peer identity to copy into this call.
+        """
         self.path = String()
         self.metadata = Metadata()
         self.timeout_ns = 0
+        if peer_certificate:
+            self.peer_certificate = peer_certificate.value().copy()
+        else:
+            self.peer_certificate = None
         self.response_metadata = Metadata()
         self.response_trailers = Metadata()
         self.abort_status = None
@@ -387,6 +401,8 @@ struct Server(Movable):
     """Routing table from full method path to handler."""
     var _tls_context: Optional[TLSContext]
     """Reusable server TLS context; None selects plaintext h2c."""
+    var _peer_certificate: Optional[PeerCertificate]
+    """Owned peer identity for the active sequential connection."""
     var _unix_path: Optional[String]
     """Unix domain socket path; None selects a TCP listener."""
     var _unix_remove_existing: Bool
@@ -404,6 +420,7 @@ struct Server(Movable):
         self.port = port
         self.routes = Dict[String, Route]()
         self._tls_context = None
+        self._peer_certificate = None
         self._unix_path = None
         self._unix_remove_existing = False
 
@@ -676,7 +693,7 @@ struct Server(Movable):
             conn.send_headers(sid, Span(resp), end_stream=True)
             return
 
-        var ctx = ServerContext()
+        var ctx = ServerContext(self._peer_certificate)
         var path = _find_header(Span(headers), ":path")
         if path:
             ctx.path = path.value()
@@ -805,6 +822,7 @@ struct Server(Movable):
         )
         while True:
             var tcp = listener.accept()
+            self._peer_certificate = None
             try:
                 var transport: GrpcTransport
                 if self._tls_context:
@@ -812,6 +830,7 @@ struct Server(Movable):
                     if tls.negotiated_alpn() != "h2":
                         tls.close()
                         continue
+                    self._peer_certificate = tls.peer_certificate()
                     transport = GrpcTransport.secure(tls^)
                 else:
                     transport = GrpcTransport.plaintext(tcp^)
@@ -824,3 +843,4 @@ struct Server(Movable):
             except:
                 # A failed TLS handshake does not stop the listener.
                 pass
+            self._peer_certificate = None
