@@ -16,7 +16,7 @@ from grpc import (
 )
 from net import resolve
 from proto import ProtoMessage, WireReader, WireWriter, decode, encode
-from tls import PeerCertificate, TLSContext
+from tls import PeerCertificate, SubjectAlternativeNames, TLSContext
 
 
 struct PackageMessage(Copyable, Defaultable, Movable, ProtoMessage):
@@ -87,13 +87,41 @@ def _check_peer_certificate_api() raises:
 
     var der: List[Byte] = [0x30, 0x00]
     var certificate = PeerCertificate(
-        leaf_der=der^, verified=True, matched_name=String()
+        leaf_der=der^,
+        verified=True,
+        matched_name=String(),
+        subject_alt_names=SubjectAlternativeNames(
+            dns_names=["client.example.test"],
+            uri_names=["spiffe://example.test/client"],
+            email_addresses=["client@example.test"],
+            ip_addresses=["192.0.2.44", "2001:db8::44"],
+        ),
     )
     var peer: Optional[PeerCertificate] = certificate^
     var authenticated = ServerContext(peer)
     assert_true(authenticated.peer_certificate)
     assert_true(authenticated.peer_certificate.value().verified)
     assert_equal(len(authenticated.peer_certificate.value().leaf_der), 2)
+    assert_equal(
+        authenticated.peer_certificate.value().subject_alt_names.dns_names[0],
+        "client.example.test",
+    )
+    assert_equal(
+        authenticated.peer_certificate.value().subject_alt_names.uri_names[0],
+        "spiffe://example.test/client",
+    )
+    assert_equal(
+        authenticated.peer_certificate.value().subject_alt_names.email_addresses[
+            0
+        ],
+        "client@example.test",
+    )
+    assert_equal(
+        authenticated.peer_certificate.value().subject_alt_names.ip_addresses[
+            1
+        ],
+        "2001:db8::44",
+    )
 
 
 def main() raises:

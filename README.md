@@ -130,9 +130,10 @@ services. It performs non-blocking handshakes, accepts only the `h2` ALPN
 token, and uses one certificate chain for all clients. It can reject clients
 without a certificate from a configured client CA before HTTP/2 dispatch.
 On both server types, `ServerContext.peer_certificate` gives the handler an
-owned copy of the verified client leaf. It is `None` for h2c, Unix sockets,
-and TLS clients that did not present a certificate. The copy remains valid
-after the connection closes.
+owned copy of the verified client leaf, including its DER bytes and typed DNS,
+URI, email, and canonical IP subject alternative names. It is `None` for h2c,
+Unix sockets, and TLS clients that did not present a certificate. The copy
+remains valid after the connection closes.
 SNI-based certificate selection is not yet supported.
 The runnable [TLS polling example](examples/polling_tls_server.mojo) exposes
 the handshake and output limits used by a typical service.
