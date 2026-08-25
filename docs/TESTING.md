@@ -11,7 +11,7 @@ how to run it.
 |---|---|---|
 | Unit tests | Each public API behaves per its docs, including error paths and edge values | `pixi run test` |
 | Compliance (differential) | Byte-level and semantic agreement with Python `protobuf`, `python-hpack`, `hyper-h2`/`hyperframe`, CPython sockets, and `grpcio` | `pixi run compliance` |
-| Official suites | h2spec (RFC 7540/7541, 146 checks), Google protobuf conformance (698 binary-format tests), the 12 canonical gRPC interop cases in both directions over h2c, TLS, and Unix sockets | part of `pixi run compliance` / `pixi run interop-official` |
+| Official suites | h2spec (RFC 7540/7541, 146 checks), Google protobuf conformance (1476 proto3 binary and JSON tests), the 12 canonical gRPC interop cases in both directions over h2c, TLS, and Unix sockets | part of `pixi run compliance` / `pixi run interop-official` |
 | Interop smoke | grpcio client ↔ mojo server and mojo client ↔ grpcio server round trips | `pixi run interop` |
 | Benchmarks | Throughput/latency baselines; CI runs them in `--smoke` mode to prove they build and execute | `pixi run bench` |
 

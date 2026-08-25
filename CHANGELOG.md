@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Updated the source and package dependency to protomojo v0.3.0. The
+  aggregated protobuf section now includes 1476 passing official proto3
+  binary and JSON cases.
 - Exposed each authenticated client's owned leaf certificate snapshot through
   `ServerContext` on blocking and polling servers.
 - Added optional client CA verification to `PollingServer.tls` with bounded

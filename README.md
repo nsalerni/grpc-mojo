@@ -23,8 +23,8 @@ not our own tests:
   over h2c, TLS, and Unix domain sockets against `grpcio`
   (`pixi run interop-official`)
 - **h2spec** (RFC 7540/7541 conformance tool): all 146 checks pass
-- **Google protobuf conformance suite**: 698/698 binary wire-format
-  tests pass (JSON/proto2/editions declared unsupported, skipped)
+- **Google protobuf conformance suite**: 1476/1476 proto3 binary and JSON
+  tests pass; the runner skips 1303 proto2 cases, which remain unsupported
 - **Differential compliance** vs Python `protobuf`, python-hpack,
   hyper-h2/hyperframe, CPython sockets, `grpcio`
   (`pixi run compliance` → [docs/COMPLIANCE.md](docs/COMPLIANCE.md))

@@ -119,14 +119,24 @@ def run_package_suites(tmp: Path):
             [sys.executable, "compliance/run_compliance.py", "--json", str(json_path)],
             cwd=pkg_dir,
         )
-        if json_path.exists():
-            data = json.loads(json_path.read_text())
-            for section, rows in data["sections"].items():
-                for name, ok, detail in rows:
-                    RESULTS.setdefault(section, []).append((name, bool(ok), detail))
-        else:
-            record(pkg, f"{pkg} compliance suite produced results",
-                   False, f"runner exited {r.returncode} without JSON output")
+        aggregate_package_suite(pkg, json_path, r.returncode)
+
+
+def aggregate_package_suite(pkg: str, json_path: Path, returncode: int):
+    """Load one package report and preserve a failing runner exit status."""
+    if not json_path.exists():
+        record(pkg, f"{pkg} compliance suite produced results",
+               False, f"runner exited {returncode} without JSON output")
+        return
+
+    data = json.loads(json_path.read_text())
+    for section, rows in data["sections"].items():
+        for name, ok, detail in rows:
+            RESULTS.setdefault(section, []).append((name, bool(ok), detail))
+
+    if returncode != 0:
+        record(pkg, f"{pkg} compliance suite exit status",
+               False, f"runner exited {returncode} with JSON output")
 
 
 # ----------------------------------------------------------------- proto ---
@@ -1898,8 +1908,8 @@ def report_result_summary(
 
 
 SECTION_TITLES = {
-    "proto": ("`proto` vs Python `protobuf`",
-              "Randomized differential testing: the reference implementation encodes seeded random messages; grpc-mojo decodes and re-encodes them; the reference parses the result and compares for semantic equality (byte equality where the encoding is deterministic). Malformed inputs must be accepted/rejected in agreement with the reference."),
+    "proto": ("`proto` vs Python `protobuf` and Google's official suite",
+              "Randomized binary and proto3 JSON checks compare against Python protobuf. Google's conformance runner executes the supported proto3 binary and JSON groups. Malformed inputs must be accepted or rejected in agreement with those references."),
     "hpack": ("`hpack` vs python-hpack",
               "Sequential header blocks encoded by one implementation and decoded by the other, in both directions, with dynamic-table state carried across blocks. Plus RFC 7541 Appendix C unit vectors (see `units`)."),
     "h2": ("`h2` vs hyper-h2 / hyperframe / h2spec",
@@ -2031,8 +2041,9 @@ def write_html_report():
         f'<span class="when">{now}</span></div>'
     )
     h.append(
-        '<p class="thesis">No self-grading: protobuf bytes are judged by Python '
-        "<code>protobuf</code>, header compression by python-hpack, HTTP/2 by "
+        '<p class="thesis">No self-grading: protobuf binary and JSON behavior '
+        "is judged by Python <code>protobuf</code> and Google&rsquo;s official "
+        "conformance runner, header compression by python-hpack, HTTP/2 by "
         "hyper-h2 (which rejects any protocol violation), sockets by CPython, "
         "and gRPC behavior by <code>grpcio</code> in both directions. The "
         "proto, hpack, h2, and net sections run in each package&rsquo;s own "

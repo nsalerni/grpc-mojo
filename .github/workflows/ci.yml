@@ -55,6 +55,46 @@ jobs:
           cache: true
           post-cleanup: true
 
+      - name: Cache protobuf conformance runner
+        id: conformance-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/conformance
+          key: conformance-runner-v33.4-${{ runner.os }}-${{ runner.arch }}-v2
+
+      - name: Install protobuf build dependencies
+        if: steps.conformance-cache.outputs.cache-hit != 'true'
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build python3-venv
+          else
+            brew install ninja
+          fi
+          python3 -m venv "$RUNNER_TEMP/cmake-4.1.2"
+          "$RUNNER_TEMP/cmake-4.1.2/bin/python" -m pip install --disable-pip-version-check cmake==4.1.2
+          echo "$RUNNER_TEMP/cmake-4.1.2/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/cmake-4.1.2/bin/cmake" --version
+          ninja --version
+
+      - name: Build protobuf conformance runner
+        if: steps.conformance-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch v33.4 https://github.com/protocolbuffers/protobuf ~/protobuf-src
+          # v33.4 links the static jsoncpp target but checks only for the shared target.
+          python3 -c 'from pathlib import Path; p = Path.home() / "protobuf-src/cmake/conformance.cmake"; s = p.read_text(); old = "if (NOT TARGET jsoncpp_lib)"; assert s.count(old) == 2; p.write_text(s.replace(old, "if (NOT TARGET jsoncpp_lib AND NOT TARGET jsoncpp_static)"))'
+          cmake -G Ninja -S ~/protobuf-src -B ~/protobuf-build \
+            -Dprotobuf_BUILD_CONFORMANCE=ON \
+            -Dprotobuf_BUILD_TESTS=OFF \
+            -Dprotobuf_FORCE_FETCH_DEPENDENCIES=ON \
+            -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+            -Dprotobuf_WITH_ZLIB=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=17
+          ninja -C ~/protobuf-build conformance_test_runner
+          mkdir -p ~/conformance && cp ~/protobuf-build/conformance_test_runner ~/conformance/
+
       - name: Fetch source dependencies (mojo-net, protomojo, mojo-http2, mojo-tls)
         run: python3 tools/fetch_deps.py
 
@@ -97,7 +137,11 @@ jobs:
           git diff --exit-code -- docs/official-interop-badge.json
 
       - name: Compliance suite (differential vs reference implementations)
-        run: pixi run compliance
+        run: |
+          chmod +x "$HOME/conformance/conformance_test_runner"
+          export LD_LIBRARY_PATH="$HOME/conformance:${LD_LIBRARY_PATH:-}"
+          export DYLD_LIBRARY_PATH="$HOME/conformance:${DYLD_LIBRARY_PATH:-}"
+          CONFORMANCE_RUNNER="$HOME/conformance/conformance_test_runner" pixi run compliance
 
       - name: Upload compliance report
         if: always()

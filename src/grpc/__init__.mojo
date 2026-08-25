@@ -19,7 +19,8 @@ kinds are supported: unary, server streaming, client streaming, and
 bidirectional streaming. Conformance is verified against reference
 implementations: the official gRPC interop suite passes 72/72 cases against
 grpcio across both roles and all three transports, the h2 layer passes h2spec
-146/146, and the proto layer passes Google protobuf conformance 698/698.
+146/146, and the proto layer passes 1476/1476 proto3 binary and JSON cases in
+Google's protobuf conformance suite.
 
 The package depends on the `h2`, `proto`, `hpack`, `net`, and `tls` packages
 (see docs/ARCHITECTURE.md); dependency edges point down only.
