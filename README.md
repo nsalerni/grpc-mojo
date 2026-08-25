@@ -208,6 +208,10 @@ grpcio-only interop smoke suite, and [docs/TESTING.md](docs/TESTING.md)
 maps out every verification layer (unit, differential, official suites,
 benchmarks) and the coverage philosophy.
 
+The gRPC framing check runs 250 deterministic cases on every pull request.
+A weekly job runs 10,000 cases from seed 20260825 and saves the first mismatch
+with enough data to reproduce it.
+
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — package layering and design
