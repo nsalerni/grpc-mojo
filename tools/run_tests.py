@@ -3,8 +3,8 @@
 
 Mojo 1.0 removed `mojo test`; tests here are ordinary executables with a
 `def main()` that runs the file's checks and prints a pass line. Each
-package's tests run against that package's include set only, mirroring the
-future standalone repos.
+package's tests run against that package's include set only, matching the
+sibling repositories checked out into packages/.
 """
 
 import subprocess

@@ -11,10 +11,10 @@ implementation:
   net    vs  CPython sockets (OS truth for TCP semantics)
   grpc   vs  grpcio (the reference gRPC implementation)
 
-The proto, hpack, h2, and net sections are executed by each package's own
-self-contained suite (packages/<pkg>/compliance/run_compliance.py) and
-aggregated here; this script adds the gRPC sections, extraction isolation,
-and the unit/interop suites, then writes the combined report.
+The proto, hpack, h2, and net sections are executed by each sibling
+package's compliance suite and aggregated here; this script adds the gRPC
+sections, extraction isolation, and the unit/interop suites, then writes
+the combined report.
 
 Rerun with: pixi run compliance
 Writes docs/COMPLIANCE.md and exits non-zero on any failure.
@@ -2147,10 +2147,9 @@ def write_report():
         f"**Result: {passed}/{total} checks passed.** Generated {now}.",
         "",
         "Every check compares grpc-mojo against an established reference",
-        "implementation, never against itself. The proto, hpack, h2, and net",
-        "sections are executed by each package's own compliance suite",
-        "(`packages/<pkg>/compliance/run_compliance.py`) and aggregated here;",
-        "the umbrella adds the gRPC, packaging, and unit-suite sections.",
+        "implementation, never against itself. Sibling packages run their own",
+        "compliance suites; this repo aggregates those results and adds the",
+        "gRPC, packaging, and unit-suite sections.",
         "",
         "## Environment",
         "",

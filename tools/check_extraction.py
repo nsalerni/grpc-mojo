@@ -28,7 +28,7 @@ PACKAGES: dict[str, list[str]] = {
     "grpc": ["h2", "hpack", "net", "proto", "tls"],
 }
 
-# package -> source directory inside this monorepo
+# package -> source directory after fetch_deps.py
 LOCATIONS: dict[str, str] = {
     "net": "packages/mojo-net/src/net",
     "hpack": "packages/mojo-http2/src/hpack",

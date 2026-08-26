@@ -1,11 +1,10 @@
 # protoc-gen-mojo — Code Generation Reference
 
 The plugin lives in [protomojo](https://github.com/nsalerni/protomojo)
-(`tools/protoc-gen-mojo`). It turns `.proto` files into Mojo message structs
-and gRPC stubs for this runtime. It is validated by the same gates: the
-generated code passes Google's protobuf conformance suite (1476/1476 proto3
-binary and JSON tests) and drives the official gRPC interop cases against
-`grpcio`.
+(`tools/protoc-gen-mojo`). After `python3 tools/fetch_deps.py` it is available
+at `packages/protomojo/tools/protoc-gen-mojo`. Generated code passes Google's
+protobuf conformance suite (1476/1476 proto3 binary and JSON tests) and drives
+the official gRPC interop cases against `grpcio`.
 
 ## Invocation
 
@@ -16,7 +15,7 @@ binary and JSON tests) and drives the official gRPC interop cases against
 ```sh
 python3 -m grpc_tools.protoc \
   -I path/to/protos \
-  --plugin=protoc-gen-mojo=path/to/protomojo/tools/protoc-gen-mojo \
+  --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo \
   --mojo_out=OUT_DIR \
   your.proto
 ```

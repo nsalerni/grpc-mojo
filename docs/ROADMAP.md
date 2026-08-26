@@ -41,6 +41,12 @@ is the live list.
 - **`std.net` RFC, `to_be_bytes`, unpadded base64, integer cast-fold.**
   These are Modular stdlib / compiler items (Track D), not local work.
 
+### Sibling packages
+
+- [mojo-tls](https://github.com/nsalerni/mojo-tls): TLS session resumption
+- [protomojo](https://github.com/nsalerni/protomojo): proto2, editions, and
+  text format remain out of scope unless a consumer needs them
+
 ### Process / access (not code)
 
 - Publishing conda packages to modular-community needs tokens and a
