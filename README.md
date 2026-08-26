@@ -35,6 +35,14 @@ overlaps bounded unary h2c or TLS connection I/O with serialized handlers.
 Streaming RPCs use the blocking server. Bidi is recv-driven, and compression
 codecs are not included yet.
 
+## Concurrency
+
+The blocking `Server` accepts one connection at a time and runs each handler
+to completion on that thread. `PollingServer` overlaps bounded unary I/O for
+many connections on one thread; handler calls are still serial and should
+return promptly. Bidi is recv-driven ping-pong. Use several processes behind
+a load balancer to use more cores. This is not an in-process async runtime.
+
 ## Layout
 
 Each future standalone repo lives as a self-contained subfolder under
