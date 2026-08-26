@@ -9,10 +9,10 @@
 
 ```sh
 python3 tools/fetch_deps.py
-pixi run example-server   # terminal 1
-pixi run example-client   # terminal 2
+pixi run example-server          # terminal 1; prints the bound port
+pixi run example-client -- PORT  # terminal 2
 ```
 
-TLS, Unix sockets, and client certificates are covered in
-[polling_tls_server.mojo](polling_tls_server.mojo) and in the module docs for
-`Server`, `PollingServer`, and `GrpcChannel`.
+Unix sockets (`Server.unix` / `GrpcChannel.connect_unix`) and client
+certificates are documented in [src/grpc/README.md](../src/grpc/README.md),
+not in these example files.

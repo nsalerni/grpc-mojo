@@ -26,8 +26,8 @@ local include paths work. A conda recipe lives in [`recipe/`](recipe/).
 
 ```sh
 pixi run test
-pixi run example-server   # terminal 1
-pixi run example-client   # terminal 2
+pixi run example-server          # terminal 1; prints the bound port
+pixi run example-client -- PORT  # terminal 2
 ```
 
 ## Example
@@ -70,8 +70,8 @@ def main() raises:
     print(client.say(req, timeout_ns=10_000_000_000).message)
 ```
 
-More examples — TLS polling, Unix sockets, and mTLS — are listed in
-[examples/README.md](examples/README.md).
+Runnable examples are listed in [examples/README.md](examples/README.md).
+Unix sockets and mTLS are documented in [src/grpc/README.md](src/grpc/README.md).
 
 ## Features
 
@@ -107,6 +107,7 @@ and [docs/TESTING.md](docs/TESTING.md).
 
 ## Documentation
 
+- [src/grpc/README.md](src/grpc/README.md) — client, server, TLS, and Unix APIs
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layering
 - [docs/CODEGEN.md](docs/CODEGEN.md) — generated types and stubs
 - [docs/PACKAGING.md](docs/PACKAGING.md) — repos, deps, and conda recipes

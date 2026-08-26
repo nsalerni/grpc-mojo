@@ -30,7 +30,8 @@ python3 tools/fetch_deps.py
 Pins live in [`deps.json`](../deps.json). Include paths in `pixi.toml` and CI
 point at those checkouts. Do not commit `packages/`.
 
-Sibling packages use `.deps/` the same way.
+Dependents that need source checkouts (`mojo-http2`, `mojo-tls`) use `.deps/`
+the same way. Leaf packages (`mojo-net`, `protomojo`) have no `deps.json`.
 
 ## Conda recipes
 
