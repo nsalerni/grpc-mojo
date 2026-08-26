@@ -162,6 +162,8 @@ struct ServerCall(Movable):
     """Monotonic time the request HEADERS were dispatched, for deadlines."""
     var max_message_size: Int
     """Maximum serialized request or response message size for this call."""
+    var _oversized_message: Bool
+    """True when recv or send hit the configured message size cap."""
 
     def client_cancelled(mut self) -> Bool:
         """Reports whether the client reset the stream (RST_STREAM).
@@ -188,9 +190,14 @@ struct ServerCall(Movable):
             On framing or connection errors, or when the message exceeds
             `max_message_size`.
         """
-        return recv_message(
-            self._conn[], self.sid, max_size=self.max_message_size
-        )
+        try:
+            return recv_message(
+                self._conn[], self.sid, max_size=self.max_message_size
+            )
+        except e:
+            if String(e) == "grpc: message exceeds max size":
+                self._oversized_message = True
+            raise e
 
     def recv[M: ProtoMessage](mut self) raises -> Optional[M]:
         """Receives and decodes the next typed request message.
@@ -251,6 +258,7 @@ struct ServerCall(Movable):
             or HTTP/2 protocol errors.
         """
         if len(payload) > self.max_message_size:
+            self._oversized_message = True
             raise Error("grpc: message exceeds max size")
         self.send_headers_once(ctx)
         send_message(self._conn[], self.sid, payload, end_stream=False)
@@ -713,6 +721,7 @@ struct Server(Movable):
             trailers_sent=False,
             call_start_ns=Int64(monotonic()),
             max_message_size=self.max_message_size,
+            _oversized_message=False,
         )
 
         # Content-type gate (spec: 415 for non-gRPC).
@@ -768,7 +777,7 @@ struct Server(Movable):
             if not call.trailers_sent:
                 var message = String(e)
                 var code = StatusCode.UNKNOWN
-                if "exceeds max size" in message:
+                if call._oversized_message:
                     code = StatusCode.RESOURCE_EXHAUSTED
                 call.finish(Status(code=code, message=message), ctx)
 

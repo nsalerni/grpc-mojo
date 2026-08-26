@@ -357,6 +357,12 @@ def dummy_handler(
     return EchoResponse(message=String("ok"))
 
 
+def size_worded_handler(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    raise Error("cache exceeds max size")
+
+
 def test_server_max_message_size() raises:
     def negative() raises:
         var server = Server("127.0.0.1", 0)
@@ -407,6 +413,48 @@ def test_server_max_message_size() raises:
             message = f.value.copy()
     assert_equal(status, String(StatusCode.RESOURCE_EXHAUSTED), message)
     assert_true("exceeds max size" in message, message)
+    client.close()
+    server_conn.close()
+
+
+def test_handler_size_wording_stays_unknown() raises:
+    var server = Server("127.0.0.1", 0)
+    server.register_unary[size_worded_handler]("/echo.Echo/Say")
+    var listener = TCPListener("127.0.0.1", 0)
+    var client_tcp = TCPStream.connect("127.0.0.1", listener.local_port)
+    var client = Http2Connection(client_tcp^, is_client=True)
+    var server_tcp = listener.accept()
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
+    listener.close()
+    var handled = List[UInt32]()
+
+    var sid = client.open_stream()
+    var headers = raw_grpc_request_headers(
+        "/echo.Echo/Say", "application/grpc", ""
+    )
+    client.send_headers(sid, Span(headers), end_stream=False)
+    var framed = frame_message(Span(encode(EchoRequest(message="hi"))))
+    client.send_data(sid, Span(framed), end_stream=True)
+    while True:
+        server_conn.process_next_frame()
+        if server.dispatch_ready(server_conn, handled) > 0:
+            break
+    client.wait_stream_end(sid)
+    var status = String()
+    var message = String()
+    for f in client.streams[sid].headers:
+        if f.name == "grpc-status":
+            status = f.value.copy()
+        if f.name == "grpc-message":
+            message = f.value.copy()
+    for f in client.streams[sid].trailers:
+        if f.name == "grpc-status":
+            status = f.value.copy()
+        if f.name == "grpc-message":
+            message = f.value.copy()
+    assert_equal(status, String(StatusCode.UNKNOWN), message)
+    assert_true("cache exceeds max size" in message, message)
     client.close()
     server_conn.close()
 
@@ -710,6 +758,7 @@ def main() raises:
     test_frame_compressed_flag()
     test_recv_message_errors()
     test_server_max_message_size()
+    test_handler_size_wording_stays_unknown()
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()
     test_missing_request_message()
