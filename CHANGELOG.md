@@ -4,7 +4,8 @@
 
 - `PollingServerConfig.keepalive_interval_ns` queues HTTP/2 keepalive PINGs
   from the Poller loop after an idle interval. 0 (the default) disables
-  them. Requires mojo-http2 v0.2.6.
+  them. PINGs wait until the client connection preface is complete.
+  Requires mojo-http2 v0.2.6 and mojo-net v0.2.4.
 - Documented the blocking `Server` vs `PollingServer` contract: serial
   handlers, one thread, multi-process for load.
 - Added `Server.set_max_message_size` so the blocking server admits

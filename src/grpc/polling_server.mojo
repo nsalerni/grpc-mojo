@@ -1358,8 +1358,11 @@ struct PollingServer(Movable):
                 ):
                     var connection = connections.pop(fd)
                     try:
-                        if connection.h2.maybe_keepalive_ping(
-                            now, self.config.keepalive_interval_ns
+                        if (
+                            connection.h2.input_preface_complete()
+                            and connection.h2.maybe_keepalive_ping(
+                                now, self.config.keepalive_interval_ns
+                            )
                         ):
                             _ = self._move_http2_output(connection)
                             self._update_connection_interest(
