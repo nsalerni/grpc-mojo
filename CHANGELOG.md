@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added `Server.set_max_message_size` so the blocking server admits
+  request and response payloads with the same 4 MiB default as
+  `PollingServer`. Oversized messages finish the call with
+  `RESOURCE_EXHAUSTED`.
 - Set the gRPC `user-agent` string to `grpc-mojo/0.2.2`.
 - Updated the source and package dependencies to mojo-http2 v0.2.5 and
   mojo-tls v0.3.0. Authenticated handlers can inspect copied DNS, URI, email,

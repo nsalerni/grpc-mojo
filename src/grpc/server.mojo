@@ -41,7 +41,11 @@ from net import TCPListener, UnixListener
 from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext
 
-from .framing import recv_message, send_message
+from .framing import (
+    DEFAULT_MAX_RECV_MESSAGE_SIZE,
+    recv_message,
+    send_message,
+)
 from .metadata import Metadata, encode_bin_value
 from .status import Status, StatusCode, percent_encode_message
 from .timeout import decode_timeout
@@ -156,6 +160,8 @@ struct ServerCall(Movable):
     """Whether the trailers have gone out (the call is finished)."""
     var call_start_ns: Int64
     """Monotonic time the request HEADERS were dispatched, for deadlines."""
+    var max_message_size: Int
+    """Maximum serialized request or response message size for this call."""
 
     def client_cancelled(mut self) -> Bool:
         """Reports whether the client reset the stream (RST_STREAM).
@@ -179,9 +185,12 @@ struct ServerCall(Movable):
             The message bytes, or None when the client half-closed.
 
         Raises:
-            On framing or connection errors.
+            On framing or connection errors, or when the message exceeds
+            `max_message_size`.
         """
-        return recv_message(self._conn[], self.sid)
+        return recv_message(
+            self._conn[], self.sid, max_size=self.max_message_size
+        )
 
     def recv[M: ProtoMessage](mut self) raises -> Optional[M]:
         """Receives and decodes the next typed request message.
@@ -238,8 +247,11 @@ struct ServerCall(Movable):
             payload: The serialized message bytes.
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors.
+            If `payload` exceeds `max_message_size`, or on connection I/O
+            or HTTP/2 protocol errors.
         """
+        if len(payload) > self.max_message_size:
+            raise Error("grpc: message exceeds max size")
         self.send_headers_once(ctx)
         send_message(self._conn[], self.sid, payload, end_stream=False)
 
@@ -391,7 +403,8 @@ struct Server(Movable):
     Register handlers with the `register_*` methods (handler functions are
     compile-time parameters, so registration builds thin function pointers
     with no boxing), then call `serve`. See examples/echo_server.mojo for a
-    complete service.
+    complete service. `set_max_message_size` caps unary and streaming
+    request and response payloads; the default is 4 MiB.
     """
 
     var host: String
@@ -408,6 +421,8 @@ struct Server(Movable):
     """Unix domain socket path; None selects a TCP listener."""
     var _unix_remove_existing: Bool
     """Whether a Unix listener may remove an existing socket file."""
+    var max_message_size: Int
+    """Maximum serialized request or response size, default 4 MiB."""
 
     def __init__(out self, host: StringSpan, port: UInt16):
         """Constructs a server with an empty routing table.
@@ -424,6 +439,23 @@ struct Server(Movable):
         self._peer_certificate = None
         self._unix_path = None
         self._unix_remove_existing = False
+        self.max_message_size = DEFAULT_MAX_RECV_MESSAGE_SIZE
+
+    def set_max_message_size(mut self, size: Int) raises:
+        """Sets the serialized request and response size limit.
+
+        Args:
+            size: Maximum message bytes. `0` rejects every non-empty
+                payload. Must fit in the 32-bit gRPC length prefix.
+
+        Raises:
+            If `size` is negative or greater than 4_294_967_295.
+        """
+        if size < 0:
+            raise Error("grpc: max_message_size must be non-negative")
+        if size > 0xFFFFFFFF:
+            raise Error("grpc: max_message_size exceeds the gRPC prefix")
+        self.max_message_size = size
 
     @staticmethod
     def tls(
@@ -680,6 +712,7 @@ struct Server(Movable):
             headers_sent=False,
             trailers_sent=False,
             call_start_ns=Int64(monotonic()),
+            max_message_size=self.max_message_size,
         )
 
         # Content-type gate (spec: 415 for non-gRPC).
@@ -730,10 +763,14 @@ struct Server(Movable):
             handler(call, ctx)
         except e:
             # Handler errors surface as UNKNOWN, like other gRPC servers.
+            # Oversized messages use RESOURCE_EXHAUSTED, matching
+            # PollingServer and the usual gRPC admission code.
             if not call.trailers_sent:
-                call.finish(
-                    Status(code=StatusCode.UNKNOWN, message=String(e)), ctx
-                )
+                var message = String(e)
+                var code = StatusCode.UNKNOWN
+                if "exceeds max size" in message:
+                    code = StatusCode.RESOURCE_EXHAUSTED
+                call.finish(Status(code=code, message=message), ctx)
 
     def dispatch_ready(
         mut self,
@@ -791,8 +828,10 @@ struct Server(Movable):
 
         Raises:
             If the TCP listener cannot bind the configured host and port,
-            or the Unix listener cannot bind its configured path.
+            or the Unix listener cannot bind its configured path, or
+            `max_message_size` is invalid.
         """
+        self.set_max_message_size(self.max_message_size)
         if self._unix_path:
             var path = self._unix_path.value().copy()
             var listener = UnixListener(

@@ -357,6 +357,60 @@ def dummy_handler(
     return EchoResponse(message=String("ok"))
 
 
+def test_server_max_message_size() raises:
+    def negative() raises:
+        var server = Server("127.0.0.1", 0)
+        server.set_max_message_size(-1)
+
+    def too_wide() raises:
+        var server = Server("127.0.0.1", 0)
+        server.set_max_message_size(0x100000000)
+
+    assert_true("non-negative" in expect_error(negative, "negative"))
+    assert_true("prefix" in expect_error(too_wide, "prefix"))
+
+    var server = Server("127.0.0.1", 0)
+    server.set_max_message_size(4)
+    server.register_unary[dummy_handler]("/echo.Echo/Say")
+    var listener = TCPListener("127.0.0.1", 0)
+    var client_tcp = TCPStream.connect("127.0.0.1", listener.local_port)
+    var client = Http2Connection(client_tcp^, is_client=True)
+    var server_tcp = listener.accept()
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
+    listener.close()
+    var handled = List[UInt32]()
+
+    var sid = client.open_stream()
+    var headers = raw_grpc_request_headers(
+        "/echo.Echo/Say", "application/grpc", ""
+    )
+    client.send_headers(sid, Span(headers), end_stream=False)
+    var framed = frame_message(Span(encode(EchoRequest(message="hello"))))
+    client.send_data(sid, Span(framed), end_stream=True)
+    while True:
+        server_conn.process_next_frame()
+        if server.dispatch_ready(server_conn, handled) > 0:
+            break
+    client.wait_stream_end(sid)
+    var status = String()
+    var message = String()
+    for f in client.streams[sid].headers:
+        if f.name == "grpc-status":
+            status = f.value.copy()
+        if f.name == "grpc-message":
+            message = f.value.copy()
+    for f in client.streams[sid].trailers:
+        if f.name == "grpc-status":
+            status = f.value.copy()
+        if f.name == "grpc-message":
+            message = f.value.copy()
+    assert_equal(status, String(StatusCode.RESOURCE_EXHAUSTED), message)
+    assert_true("exceeds max size" in message, message)
+    client.close()
+    server_conn.close()
+
+
 def test_malformed_grpc_timeout_fails_call_only() raises:
     var server = Server("127.0.0.1", 0)
     server.register_unary[dummy_handler]("/echo.Echo/Say")
@@ -655,6 +709,7 @@ def main() raises:
     test_percent_boundaries()
     test_frame_compressed_flag()
     test_recv_message_errors()
+    test_server_max_message_size()
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()
     test_missing_request_message()
