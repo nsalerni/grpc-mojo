@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Set the gRPC `user-agent` string to `grpc-mojo/0.2.2`.
 - Updated the source and package dependencies to mojo-http2 v0.2.5 and
   mojo-tls v0.3.0. Authenticated handlers can inspect copied DNS, URI, email,
   and canonical IP subject alternative names through
