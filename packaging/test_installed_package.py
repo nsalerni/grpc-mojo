@@ -20,7 +20,7 @@ DEPENDENCIES = [
     ("mojo-net", "0.2.2", PACKAGES / "mojo-net"),
     ("protomojo", "0.3.0", PACKAGES / "protomojo"),
     ("mojo-tls", "0.3.0", PACKAGES / "mojo-tls"),
-    ("mojo-http2", "0.2.5", PACKAGES / "mojo-http2"),
+    ("mojo-http2", "0.2.6", PACKAGES / "mojo-http2"),
 ]
 
 

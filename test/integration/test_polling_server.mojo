@@ -145,6 +145,29 @@ def test_config_and_registration() raises:
         raised = True
     assert_true(raised, "handshake timeout must fit the Poller millisecond ABI")
 
+    raised = False
+    try:
+        var negative_keepalive = PollingServerConfig(keepalive_interval_ns=-1)
+        negative_keepalive.validate()
+    except:
+        raised = True
+    assert_true(raised, "keepalive interval must be non-negative")
+
+    var keepalive_off = PollingServerConfig(keepalive_interval_ns=0)
+    keepalive_off.validate()
+    var keepalive_on = PollingServerConfig(keepalive_interval_ns=30_000_000_000)
+    keepalive_on.validate()
+
+    raised = False
+    try:
+        var keepalive_overflow = PollingServerConfig(
+            keepalive_interval_ns=Int64(0x80000000) * 1_000_000
+        )
+        keepalive_overflow.validate()
+    except:
+        raised = True
+    assert_true(raised, "keepalive interval must fit the Poller millisecond ABI")
+
     var tls_server = PollingServer.tls(
         "127.0.0.1",
         0,

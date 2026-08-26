@@ -15,7 +15,8 @@
 TCP connections. Handler functions still run serially and must return
 promptly. Streaming RPCs, Unix sockets, and graceful shutdown remain on the
 blocking server path. TLS handshakes advance through the same Poller and
-strictly require the `h2` ALPN token.
+strictly require the `h2` ALPN token. Optional HTTP/2 keepalive PINGs are
+driven from the Poller loop when `keepalive_interval_ns` is positive.
 
 Every connection has one active RPC stream and explicit inactivity, request,
 read, frame, write, message, and output limits. The HTTP/2 output queue and
@@ -80,6 +81,8 @@ struct PollingServerConfig(Copyable, Movable):
     """Maximum first-request or active-request setup time."""
     var tls_handshake_timeout_ms: Int
     """Maximum time allowed for a TLS handshake."""
+    var keepalive_interval_ns: Int64
+    """Idle nanoseconds before an HTTP/2 keepalive PING; 0 disables PINGs."""
 
     def __init__(
         out self,
@@ -96,6 +99,7 @@ struct PollingServerConfig(Copyable, Movable):
         idle_timeout_ms: Int = 300_000,
         incomplete_request_timeout_ms: Int = 30_000,
         tls_handshake_timeout_ms: Int = 10_000,
+        keepalive_interval_ns: Int64 = 0,
     ):
         """Constructs a limit set, using safe bounded defaults.
 
@@ -117,6 +121,10 @@ struct PollingServerConfig(Copyable, Movable):
                 first-request setup or an active incomplete request.
             tls_handshake_timeout_ms: Maximum milliseconds allowed for a TLS
                 handshake. This limit is unused by h2c connections.
+            keepalive_interval_ns: Idle nanoseconds before
+                `Http2Connection.maybe_keepalive_ping` queues a PING. 0
+                disables keepalive. PINGs are caller-driven from the Poller
+                loop; there is no internal timer.
         """
         self.max_connections = max_connections
         self.max_accepts_per_event = max_accepts_per_event
@@ -130,6 +138,7 @@ struct PollingServerConfig(Copyable, Movable):
         self.idle_timeout_ms = idle_timeout_ms
         self.incomplete_request_timeout_ms = incomplete_request_timeout_ms
         self.tls_handshake_timeout_ms = tls_handshake_timeout_ms
+        self.keepalive_interval_ns = keepalive_interval_ns
 
     def validate(self) raises:
         """Rejects limits that cannot make safe forward progress.
@@ -171,6 +180,8 @@ struct PollingServerConfig(Copyable, Movable):
             raise Error("grpc: incomplete_request_timeout_ms must be positive")
         if self.tls_handshake_timeout_ms <= 0:
             raise Error("grpc: tls_handshake_timeout_ms must be positive")
+        if self.keepalive_interval_ns < 0:
+            raise Error("grpc: keepalive_interval_ns must be non-negative")
         # Poller forwards milliseconds to epoll_wait/kqueue through c_int.
         var max_timeout_ms = 0x7FFFFFFF
         if (
@@ -179,6 +190,8 @@ struct PollingServerConfig(Copyable, Movable):
             or self.tls_handshake_timeout_ms > max_timeout_ms
         ):
             raise Error("grpc: timeout exceeds Poller millisecond range")
+        if self.keepalive_interval_ns > Int64(max_timeout_ms) * 1_000_000:
+            raise Error("grpc: keepalive interval exceeds Poller millisecond range")
 
 
 @fieldwise_init
@@ -324,6 +337,7 @@ struct _PollingConnection(Movable):
         self.peer_certificate = peer_certificate^
         self.accepted_ns = Int64(monotonic())
         self.last_activity_ns = self.accepted_ns
+        self.h2.touch_keepalive(self.accepted_ns)
         self.served_request = False
         self.h2.max_concurrent_streams = 1
         self.h2.max_pending_output_size = config.max_pending_output_size
@@ -479,7 +493,8 @@ struct PollingServer(Movable):
     execute one at a time on the event-loop thread, so they should be short
     and non-blocking. The default constructor serves h2c; `tls` performs
     non-blocking TLS handshakes and requires `h2` ALPN. Use `Server` for
-    streaming RPCs.
+    streaming RPCs. Set `config.keepalive_interval_ns` to send HTTP/2
+    keepalive PINGs from the event loop; the default of 0 sends none.
     """
 
     var host: String
@@ -984,6 +999,7 @@ struct PollingServer(Movable):
                     connection.close_after_flush = True
                     return
                 connection.last_activity_ns = Int64(monotonic())
+                connection.h2.touch_keepalive(connection.last_activity_ns)
                 remaining_bytes -= count
                 connection.resume_read = True
                 connection.io_wants_read = False
@@ -1030,6 +1046,7 @@ struct PollingServer(Movable):
                 )
                 if count > 0:
                     connection.last_activity_ns = Int64(monotonic())
+                    connection.h2.touch_keepalive(connection.last_activity_ns)
                     connection.io_wants_read = False
                     connection.io_wants_write = False
                     connection.io_blocked_read = False
@@ -1125,6 +1142,12 @@ struct PollingServer(Movable):
                 remaining = connections[fd].deadline_remaining(now)
             if remaining >= 0 and (closest < 0 or remaining < closest):
                 closest = remaining
+            if self.config.keepalive_interval_ns > 0:
+                if (
+                    closest < 0
+                    or self.config.keepalive_interval_ns < closest
+                ):
+                    closest = self.config.keepalive_interval_ns
         if closest < 0:
             return -1
         if closest <= 0:
@@ -1324,6 +1347,24 @@ struct PollingServer(Movable):
                     try:
                         self._drive_connection(connection)
                         self._update_connection_interest(poller, fd, connection)
+                        connections[fd] = connection^
+                    except:
+                        closing[fd] = connection^
+                        close_fds.append(fd)
+                        continue
+                if (
+                    self.config.keepalive_interval_ns > 0
+                    and fd in connections
+                ):
+                    var connection = connections.pop(fd)
+                    try:
+                        if connection.h2.maybe_keepalive_ping(
+                            now, self.config.keepalive_interval_ns
+                        ):
+                            _ = self._move_http2_output(connection)
+                            self._update_connection_interest(
+                                poller, fd, connection
+                            )
                         connections[fd] = connection^
                     except:
                         closing[fd] = connection^
