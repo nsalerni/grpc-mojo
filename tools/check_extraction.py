@@ -123,7 +123,7 @@ from grpc import Metadata, Status, StatusCode, frame_message
 
 def main() raises:
     var md = Metadata()
-    md.add(String("x-smoke"), String("ok"))
+    md.add("x-smoke", "ok")
     var payload: List[Byte] = [1, 2, 3]
     var framed = frame_message(Span(payload))
     if len(framed) != 8:

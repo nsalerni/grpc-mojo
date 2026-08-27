@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `Metadata.add` and `add_binary` take `StringSpan` for keys and ASCII
+  values, matching host and method-path constructors. Entries are copied
+  to owned `HeaderField` strings for storage.
 - Pin source and package tests to protomojo v0.4.0. Generated enum fields
   are Equatable wrapper structs (`value`, `name()`, `from_name()`).
 - Pin source and package tests to mojo-http2 v0.2.7.

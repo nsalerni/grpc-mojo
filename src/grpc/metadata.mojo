@@ -142,7 +142,7 @@ struct Metadata(Copyable, Defaultable, Movable, Sized, Writable):
         """Constructs an empty metadata container."""
         self.entries = List[HeaderField]()
 
-    def add(mut self, var key: String, var value: String) raises:
+    def add(mut self, key: StringSpan, value: StringSpan) raises:
         """Appends an ASCII metadata entry.
 
         Args:
@@ -155,12 +155,12 @@ struct Metadata(Copyable, Defaultable, Movable, Sized, Writable):
             If the key is invalid or reserved.
         """
         if not is_valid_metadata_key(key):
-            raise Error("grpc: invalid metadata key: " + key)
+            raise Error("grpc: invalid metadata key: " + String(key))
         if key.startswith("grpc-"):
             raise Error("grpc: metadata keys may not start with grpc-")
-        self.entries.append(HeaderField(name=key^, value=value^))
+        self.entries.append(HeaderField(name=String(key), value=String(value)))
 
-    def add_binary(mut self, var key: String, value: Span[Byte, _]) raises:
+    def add_binary(mut self, key: StringSpan, value: Span[Byte, _]) raises:
         """Appends a binary metadata entry, base64-coding the value.
 
         Args:
@@ -174,9 +174,9 @@ struct Metadata(Copyable, Defaultable, Movable, Sized, Writable):
         if not is_binary_key(key):
             raise Error("grpc: binary metadata keys must end in -bin")
         if not is_valid_metadata_key(key):
-            raise Error("grpc: invalid metadata key: " + key)
+            raise Error("grpc: invalid metadata key: " + String(key))
         self.entries.append(
-            HeaderField(name=key^, value=encode_bin_value(value))
+            HeaderField(name=String(key), value=encode_bin_value(value))
         )
 
     def get(self, key: StringSpan) -> Optional[String]:

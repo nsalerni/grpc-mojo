@@ -79,9 +79,9 @@ for what the codegen emits; keep the two structurally in sync.
 - This repo targets Mojo 1.0: `def` only (no `fn`), `comptime` not `alias`,
   `std.`-prefixed imports, explicit `.copy()`/`^` moves, and tests are plain
   executables run by `tools/run_tests.py` (`mojo test` no longer exists).
-  Hosts, method paths, and other borrowed text take `StringSpan`. Filesystem
-  paths are borrowed at the gRPC boundary and copied to `String` at the TLS
-  FFI boundary.
+  Hosts, method paths, metadata keys, and other borrowed text take
+  `StringSpan`. Filesystem paths are borrowed at the gRPC boundary and
+  copied to `String` at the TLS FFI boundary.
 
 ## Submitting changes
 

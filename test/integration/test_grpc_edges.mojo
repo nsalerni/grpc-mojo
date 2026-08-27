@@ -120,9 +120,9 @@ def test_metadata_key_validation() raises:
 
 def test_metadata_container_semantics() raises:
     var md = Metadata()
-    md.add(String("k"), String("v1"))
-    md.add(String("k"), String("v2"))
-    md.add(String("other"), String("x"))
+    md.add("k", "v1")
+    md.add("k", "v2")
+    md.add("other", "x")
     assert_equal(len(md), 3, "duplicates count separately")
     var all_k = md.get_all("k")
     assert_equal(len(all_k), 2)

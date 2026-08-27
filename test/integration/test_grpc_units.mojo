@@ -75,21 +75,21 @@ def test_binary_metadata() raises:
     assert_equal(to_hex(back2), "0001feff")
 
     var md = Metadata()
-    md.add(String("x-trace"), String("abc"))
-    md.add_binary(String("x-data-bin"), Span(data))
+    md.add("x-trace", "abc")
+    md.add_binary("x-data-bin", Span(data))
     assert_equal(md.get("x-trace").value(), "abc")
     assert_equal(to_hex(md.get_binary("x-data-bin").value()), "0001feff")
 
     var raised = False
     try:
-        md.add(String("UPPER"), String("x"))
+        md.add("UPPER", "x")
     except:
         raised = True
     assert_true(raised, "uppercase metadata key must raise")
 
     raised = False
     try:
-        md.add(String("grpc-custom"), String("x"))
+        md.add("grpc-custom", "x")
     except:
         raised = True
     assert_true(raised, "grpc- prefixed key must raise")
