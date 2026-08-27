@@ -143,6 +143,9 @@ jobs:
           export DYLD_LIBRARY_PATH="$HOME/conformance:${DYLD_LIBRARY_PATH:-}"
           CONFORMANCE_RUNNER="$HOME/conformance/conformance_test_runner" pixi run compliance
 
+      - name: Comparative benches (smoke)
+        run: pixi run bench-compare-smoke
+
       - name: Upload compliance report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

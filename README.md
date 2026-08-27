@@ -234,6 +234,7 @@ with enough data to reproduce it.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — sequenced plan and status
 - [docs/TESTING.md](docs/TESTING.md) — verification layers, coverage
   philosophy, and benchmarks
+- [docs/BENCHMARKS.md](docs/BENCHMARKS.md) — grpc-mojo vs grpcio vs tonic
 - Each package carries its own README:
   [mojo-net](packages/mojo-net/README.md) ·
   [mojo-http2](packages/mojo-http2/README.md) ·

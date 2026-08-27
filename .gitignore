@@ -17,3 +17,6 @@ __pycache__/
 
 # fetched source dependencies
 /packages/
+
+# tonic comparison sidecar
+/bench/tonic-echo/target/
