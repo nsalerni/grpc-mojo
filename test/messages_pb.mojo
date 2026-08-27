@@ -23,22 +23,86 @@ from proto import (
 )
 
 
-struct PayloadType:
-    """Values of the `PayloadType` protobuf enum (fields carry `Int32`)."""
+struct PayloadType(Copyable, ImplicitlyCopyable, Movable, Equatable):
+    """Proto3 open enum `PayloadType`. Unknown numeric values are preserved."""
 
-    comptime COMPRESSABLE = 0
+    var value: Int32
+    """The wire number, including values not named in the .proto."""
+
+    comptime COMPRESSABLE: Int32 = 0
     """`COMPRESSABLE` = 0."""
 
+    def __init__(out self, value: Int32 = 0):
+        """Wraps a proto3 enum number, including unknown values.
 
-struct GrpclbRouteType:
-    """Values of the `GrpclbRouteType` protobuf enum (fields carry `Int32`)."""
+        Args:
+            value: The wire number. Defaults to 0 (the unspecified value).
+        """
+        self.value = value
 
-    comptime GRPCLB_ROUTE_TYPE_UNKNOWN = 0
+    def __eq__(self, other: Self) -> Bool:
+        """Compares two enum wrappers by wire number."""
+        return self.value == other.value
+
+    def name(self) -> Optional[String]:
+        """Returns the first declared name for this number, or None if unknown."""
+        if self.value == 0:
+            return String("COMPRESSABLE")
+        return None
+
+    @staticmethod
+    def from_name(name: StringSpan) -> Optional[Self]:
+        """Looks up a declared name. Unknown names return None."""
+        if name == "COMPRESSABLE":
+            return Self(value=0)
+        return None
+
+
+struct GrpclbRouteType(Copyable, ImplicitlyCopyable, Movable, Equatable):
+    """Proto3 open enum `GrpclbRouteType`. Unknown numeric values are preserved."""
+
+    var value: Int32
+    """The wire number, including values not named in the .proto."""
+
+    comptime GRPCLB_ROUTE_TYPE_UNKNOWN: Int32 = 0
     """`GRPCLB_ROUTE_TYPE_UNKNOWN` = 0."""
-    comptime GRPCLB_ROUTE_TYPE_FALLBACK = 1
+    comptime GRPCLB_ROUTE_TYPE_FALLBACK: Int32 = 1
     """`GRPCLB_ROUTE_TYPE_FALLBACK` = 1."""
-    comptime GRPCLB_ROUTE_TYPE_BACKEND = 2
+    comptime GRPCLB_ROUTE_TYPE_BACKEND: Int32 = 2
     """`GRPCLB_ROUTE_TYPE_BACKEND` = 2."""
+
+    def __init__(out self, value: Int32 = 0):
+        """Wraps a proto3 enum number, including unknown values.
+
+        Args:
+            value: The wire number. Defaults to 0 (the unspecified value).
+        """
+        self.value = value
+
+    def __eq__(self, other: Self) -> Bool:
+        """Compares two enum wrappers by wire number."""
+        return self.value == other.value
+
+    def name(self) -> Optional[String]:
+        """Returns the first declared name for this number, or None if unknown."""
+        if self.value == 0:
+            return String("GRPCLB_ROUTE_TYPE_UNKNOWN")
+        elif self.value == 1:
+            return String("GRPCLB_ROUTE_TYPE_FALLBACK")
+        elif self.value == 2:
+            return String("GRPCLB_ROUTE_TYPE_BACKEND")
+        return None
+
+    @staticmethod
+    def from_name(name: StringSpan) -> Optional[Self]:
+        """Looks up a declared name. Unknown names return None."""
+        if name == "GRPCLB_ROUTE_TYPE_UNKNOWN":
+            return Self(value=0)
+        elif name == "GRPCLB_ROUTE_TYPE_FALLBACK":
+            return Self(value=1)
+        elif name == "GRPCLB_ROUTE_TYPE_BACKEND":
+            return Self(value=2)
+        return None
 
 
 struct BoolValue(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
@@ -141,7 +205,7 @@ struct BoolValue(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage)
 struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `Payload` protobuf message."""
 
-    var type: Int32
+    var type: PayloadType
     """Field `type` (number 1)."""
     var body: List[Byte]
     """Field `body` (number 2)."""
@@ -150,7 +214,7 @@ struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.type = 0
+        self.type = PayloadType()
         self.body = List[Byte]()
         self._unknown = List[Byte]()
 
@@ -163,8 +227,8 @@ struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
         Args:
             writer: Destination wire-format writer.
         """
-        if self.type != 0:
-            writer.int32(1, self.type)
+        if self.type.value != 0:
+            writer.int32(1, self.type.value)
         if len(self.body) != 0:
             writer.bytes_field(2, Span(self.body))
         writer.buf.extend(Span(self._unknown))
@@ -189,7 +253,7 @@ struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.type = reader.int32_value()
+                    self.type = PayloadType(value=reader.int32_value())
             elif field == 2:
                 if wire_type != WIRE_LEN:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -210,12 +274,12 @@ struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
             Error: If a field cannot be written as valid JSON.
         """
         writer.begin_object()
-        if self.type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("type", "type")
-            if self.type == 0:
+            if self.type.value == 0:
                 writer.string_value("COMPRESSABLE")
             else:
-                writer.int32_value(self.type)
+                writer.int32_value(self.type.value)
         if len(self.body) != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("body", "body")
             writer.bytes_value(Span(self.body))
@@ -245,16 +309,16 @@ struct Payload(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
                     raise Error("proto json: duplicate field type")
                 seen_1 = True
                 if reader.read_null():
-                    self.type = 0
+                    self.type = PayloadType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "COMPRESSABLE":
-                            self.type = 0
+                            self.type = PayloadType(value=0)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.type = reader.int32_value()
+                        self.type = PayloadType(value=reader.int32_value())
             elif field_name == "body" or field_name == "body":
                 if seen_2:
                     raise Error("proto json: duplicate field body")
@@ -389,7 +453,7 @@ struct EchoStatus(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage
 struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `SimpleRequest` protobuf message."""
 
-    var response_type: Int32
+    var response_type: PayloadType
     """Field `response_type` (number 1)."""
     var response_size: Int32
     """Field `response_size` (number 2)."""
@@ -416,7 +480,7 @@ struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMess
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.response_type = 0
+        self.response_type = PayloadType()
         self.response_size = 0
         self.payload = None
         self.fill_username = False
@@ -438,8 +502,8 @@ struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMess
         Args:
             writer: Destination wire-format writer.
         """
-        if self.response_type != 0:
-            writer.int32(1, self.response_type)
+        if self.response_type.value != 0:
+            writer.int32(1, self.response_type.value)
         if self.response_size != 0:
             writer.int32(2, self.response_size)
         if self.payload:
@@ -492,7 +556,7 @@ struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMess
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.response_type = reader.int32_value()
+                    self.response_type = PayloadType(value=reader.int32_value())
             elif field == 2:
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -593,12 +657,12 @@ struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMess
             Error: If a field cannot be written as valid JSON.
         """
         writer.begin_object()
-        if self.response_type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.response_type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("responseType", "response_type")
-            if self.response_type == 0:
+            if self.response_type.value == 0:
                 writer.string_value("COMPRESSABLE")
             else:
-                writer.int32_value(self.response_type)
+                writer.int32_value(self.response_type.value)
         if self.response_size != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("responseSize", "response_size")
             writer.int32_value(self.response_size)
@@ -664,16 +728,16 @@ struct SimpleRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMess
                     raise Error("proto json: duplicate field responseType")
                 seen_1 = True
                 if reader.read_null():
-                    self.response_type = 0
+                    self.response_type = PayloadType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "COMPRESSABLE":
-                            self.response_type = 0
+                            self.response_type = PayloadType(value=0)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.response_type = reader.int32_value()
+                        self.response_type = PayloadType(value=reader.int32_value())
             elif field_name == "responseSize" or field_name == "response_size":
                 if seen_2:
                     raise Error("proto json: duplicate field responseSize")
@@ -769,7 +833,7 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
     """Field `oauth_scope` (number 3)."""
     var server_id: String
     """Field `server_id` (number 4)."""
-    var grpclb_route_type: Int32
+    var grpclb_route_type: GrpclbRouteType
     """Field `grpclb_route_type` (number 5)."""
     var hostname: String
     """Field `hostname` (number 6)."""
@@ -782,7 +846,7 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
         self.username = String()
         self.oauth_scope = String()
         self.server_id = String()
-        self.grpclb_route_type = 0
+        self.grpclb_route_type = GrpclbRouteType()
         self.hostname = String()
         self._unknown = List[Byte]()
 
@@ -805,8 +869,8 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
             writer.string_field(3, self.oauth_scope)
         if self.server_id.byte_length() != 0:
             writer.string_field(4, self.server_id)
-        if self.grpclb_route_type != 0:
-            writer.int32(5, self.grpclb_route_type)
+        if self.grpclb_route_type.value != 0:
+            writer.int32(5, self.grpclb_route_type.value)
         if self.hostname.byte_length() != 0:
             writer.string_field(6, self.hostname)
         writer.buf.extend(Span(self._unknown))
@@ -858,7 +922,7 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.grpclb_route_type = reader.int32_value()
+                    self.grpclb_route_type = GrpclbRouteType(value=reader.int32_value())
             elif field == 6:
                 if wire_type != WIRE_LEN:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -891,16 +955,16 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
         if self.server_id.byte_length() != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("serverId", "server_id")
             writer.string_value(self.server_id)
-        if self.grpclb_route_type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.grpclb_route_type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("grpclbRouteType", "grpclb_route_type")
-            if self.grpclb_route_type == 0:
+            if self.grpclb_route_type.value == 0:
                 writer.string_value("GRPCLB_ROUTE_TYPE_UNKNOWN")
-            elif self.grpclb_route_type == 1:
+            elif self.grpclb_route_type.value == 1:
                 writer.string_value("GRPCLB_ROUTE_TYPE_FALLBACK")
-            elif self.grpclb_route_type == 2:
+            elif self.grpclb_route_type.value == 2:
                 writer.string_value("GRPCLB_ROUTE_TYPE_BACKEND")
             else:
-                writer.int32_value(self.grpclb_route_type)
+                writer.int32_value(self.grpclb_route_type.value)
         if self.hostname.byte_length() != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("hostname", "hostname")
             writer.string_value(self.hostname)
@@ -966,20 +1030,20 @@ struct SimpleResponse(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMes
                     raise Error("proto json: duplicate field grpclbRouteType")
                 seen_5 = True
                 if reader.read_null():
-                    self.grpclb_route_type = 0
+                    self.grpclb_route_type = GrpclbRouteType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "GRPCLB_ROUTE_TYPE_UNKNOWN":
-                            self.grpclb_route_type = 0
+                            self.grpclb_route_type = GrpclbRouteType(value=0)
                         elif enum_name.value() == "GRPCLB_ROUTE_TYPE_FALLBACK":
-                            self.grpclb_route_type = 1
+                            self.grpclb_route_type = GrpclbRouteType(value=1)
                         elif enum_name.value() == "GRPCLB_ROUTE_TYPE_BACKEND":
-                            self.grpclb_route_type = 2
+                            self.grpclb_route_type = GrpclbRouteType(value=2)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.grpclb_route_type = reader.int32_value()
+                        self.grpclb_route_type = GrpclbRouteType(value=reader.int32_value())
             elif field_name == "hostname" or field_name == "hostname":
                 if seen_6:
                     raise Error("proto json: duplicate field hostname")
@@ -1410,7 +1474,7 @@ struct ResponseParameters(Copyable, Defaultable, Movable, ProtoMessage, ProtoJso
 struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `StreamingOutputCallRequest` protobuf message."""
 
-    var response_type: Int32
+    var response_type: PayloadType
     """Field `response_type` (number 1)."""
     var response_parameters: List[ResponseParameters]
     """Field `response_parameters` (number 2, repeated)."""
@@ -1425,7 +1489,7 @@ struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, 
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.response_type = 0
+        self.response_type = PayloadType()
         self.response_parameters = List[ResponseParameters]()
         self.payload = None
         self.response_status = None
@@ -1441,8 +1505,8 @@ struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, 
         Args:
             writer: Destination wire-format writer.
         """
-        if self.response_type != 0:
-            writer.int32(1, self.response_type)
+        if self.response_type.value != 0:
+            writer.int32(1, self.response_type.value)
         for v in self.response_parameters:
             var sub = WireWriter()
             v.encode_to(sub)
@@ -1481,7 +1545,7 @@ struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, 
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.response_type = reader.int32_value()
+                    self.response_type = PayloadType(value=reader.int32_value())
             elif field == 2:
                 if wire_type != WIRE_LEN:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -1541,12 +1605,12 @@ struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, 
             Error: If a field cannot be written as valid JSON.
         """
         writer.begin_object()
-        if self.response_type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.response_type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("responseType", "response_type")
-            if self.response_type == 0:
+            if self.response_type.value == 0:
                 writer.string_value("COMPRESSABLE")
             else:
-                writer.int32_value(self.response_type)
+                writer.int32_value(self.response_type.value)
         if len(self.response_parameters) != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("responseParameters", "response_parameters")
             writer.begin_array()
@@ -1592,16 +1656,16 @@ struct StreamingOutputCallRequest(Copyable, Defaultable, Movable, ProtoMessage, 
                     raise Error("proto json: duplicate field responseType")
                 seen_1 = True
                 if reader.read_null():
-                    self.response_type = 0
+                    self.response_type = PayloadType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "COMPRESSABLE":
-                            self.response_type = 0
+                            self.response_type = PayloadType(value=0)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.response_type = reader.int32_value()
+                        self.response_type = PayloadType(value=reader.int32_value())
             elif field_name == "responseParameters" or field_name == "response_parameters":
                 if seen_2:
                     raise Error("proto json: duplicate field responseParameters")
@@ -2153,15 +2217,51 @@ struct LoadBalancerStatsRequest(Copyable, Defaultable, Movable, ProtoMessage, Pr
                 reader.skip_unknown_value()
 
 
-struct LoadBalancerStatsResponse_MetadataType:
-    """Values of the `MetadataType` protobuf enum (fields carry `Int32`)."""
+struct LoadBalancerStatsResponse_MetadataType(Copyable, ImplicitlyCopyable, Movable, Equatable):
+    """Proto3 open enum `MetadataType`. Unknown numeric values are preserved."""
 
-    comptime UNKNOWN = 0
+    var value: Int32
+    """The wire number, including values not named in the .proto."""
+
+    comptime UNKNOWN: Int32 = 0
     """`UNKNOWN` = 0."""
-    comptime INITIAL = 1
+    comptime INITIAL: Int32 = 1
     """`INITIAL` = 1."""
-    comptime TRAILING = 2
+    comptime TRAILING: Int32 = 2
     """`TRAILING` = 2."""
+
+    def __init__(out self, value: Int32 = 0):
+        """Wraps a proto3 enum number, including unknown values.
+
+        Args:
+            value: The wire number. Defaults to 0 (the unspecified value).
+        """
+        self.value = value
+
+    def __eq__(self, other: Self) -> Bool:
+        """Compares two enum wrappers by wire number."""
+        return self.value == other.value
+
+    def name(self) -> Optional[String]:
+        """Returns the first declared name for this number, or None if unknown."""
+        if self.value == 0:
+            return String("UNKNOWN")
+        elif self.value == 1:
+            return String("INITIAL")
+        elif self.value == 2:
+            return String("TRAILING")
+        return None
+
+    @staticmethod
+    def from_name(name: StringSpan) -> Optional[Self]:
+        """Looks up a declared name. Unknown names return None."""
+        if name == "UNKNOWN":
+            return Self(value=0)
+        elif name == "INITIAL":
+            return Self(value=1)
+        elif name == "TRAILING":
+            return Self(value=2)
+        return None
 
 
 struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
@@ -2171,7 +2271,7 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
     """Field `key` (number 1)."""
     var value: String
     """Field `value` (number 2)."""
-    var type: Int32
+    var type: LoadBalancerStatsResponse_MetadataType
     """Field `type` (number 3)."""
     var _unknown: List[Byte]
     """Preserved unknown fields, re-emitted on encode."""
@@ -2180,7 +2280,7 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
         """Initializes all fields to their proto3 defaults."""
         self.key = String()
         self.value = String()
-        self.type = 0
+        self.type = LoadBalancerStatsResponse_MetadataType()
         self._unknown = List[Byte]()
 
     def encode_to(self, mut writer: WireWriter):
@@ -2196,8 +2296,8 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
             writer.string_field(1, self.key)
         if self.value.byte_length() != 0:
             writer.string_field(2, self.value)
-        if self.type != 0:
-            writer.int32(3, self.type)
+        if self.type.value != 0:
+            writer.int32(3, self.type.value)
         writer.buf.extend(Span(self._unknown))
 
     def merge_from(mut self, mut reader: WireReader) raises:
@@ -2230,7 +2330,7 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.type = reader.int32_value()
+                    self.type = LoadBalancerStatsResponse_MetadataType(value=reader.int32_value())
             else:
                 reader.capture_field(field, wire_type, self._unknown)
 
@@ -2252,16 +2352,16 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
         if self.value.byte_length() != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("value", "value")
             writer.string_value(self.value)
-        if self.type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("type", "type")
-            if self.type == 0:
+            if self.type.value == 0:
                 writer.string_value("UNKNOWN")
-            elif self.type == 1:
+            elif self.type.value == 1:
                 writer.string_value("INITIAL")
-            elif self.type == 2:
+            elif self.type.value == 2:
                 writer.string_value("TRAILING")
             else:
-                writer.int32_value(self.type)
+                writer.int32_value(self.type.value)
         writer.end_object()
 
     def merge_json_from(
@@ -2305,20 +2405,20 @@ struct LoadBalancerStatsResponse_MetadataEntry(Copyable, Defaultable, Movable, P
                     raise Error("proto json: duplicate field type")
                 seen_3 = True
                 if reader.read_null():
-                    self.type = 0
+                    self.type = LoadBalancerStatsResponse_MetadataType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "UNKNOWN":
-                            self.type = 0
+                            self.type = LoadBalancerStatsResponse_MetadataType(value=0)
                         elif enum_name.value() == "INITIAL":
-                            self.type = 1
+                            self.type = LoadBalancerStatsResponse_MetadataType(value=1)
                         elif enum_name.value() == "TRAILING":
-                            self.type = 2
+                            self.type = LoadBalancerStatsResponse_MetadataType(value=2)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.type = reader.int32_value()
+                        self.type = LoadBalancerStatsResponse_MetadataType(value=reader.int32_value())
             else:
                 reader.skip_unknown_value()
 
@@ -3528,19 +3628,51 @@ struct LoadBalancerAccumulatedStatsResponse(Copyable, Defaultable, Movable, Prot
                 reader.skip_unknown_value()
 
 
-struct ClientConfigureRequest_RpcType:
-    """Values of the `RpcType` protobuf enum (fields carry `Int32`)."""
+struct ClientConfigureRequest_RpcType(Copyable, ImplicitlyCopyable, Movable, Equatable):
+    """Proto3 open enum `RpcType`. Unknown numeric values are preserved."""
 
-    comptime EMPTY_CALL = 0
+    var value: Int32
+    """The wire number, including values not named in the .proto."""
+
+    comptime EMPTY_CALL: Int32 = 0
     """`EMPTY_CALL` = 0."""
-    comptime UNARY_CALL = 1
+    comptime UNARY_CALL: Int32 = 1
     """`UNARY_CALL` = 1."""
+
+    def __init__(out self, value: Int32 = 0):
+        """Wraps a proto3 enum number, including unknown values.
+
+        Args:
+            value: The wire number. Defaults to 0 (the unspecified value).
+        """
+        self.value = value
+
+    def __eq__(self, other: Self) -> Bool:
+        """Compares two enum wrappers by wire number."""
+        return self.value == other.value
+
+    def name(self) -> Optional[String]:
+        """Returns the first declared name for this number, or None if unknown."""
+        if self.value == 0:
+            return String("EMPTY_CALL")
+        elif self.value == 1:
+            return String("UNARY_CALL")
+        return None
+
+    @staticmethod
+    def from_name(name: StringSpan) -> Optional[Self]:
+        """Looks up a declared name. Unknown names return None."""
+        if name == "EMPTY_CALL":
+            return Self(value=0)
+        elif name == "UNARY_CALL":
+            return Self(value=1)
+        return None
 
 
 struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `Metadata` protobuf message."""
 
-    var type: Int32
+    var type: ClientConfigureRequest_RpcType
     """Field `type` (number 1)."""
     var key: String
     """Field `key` (number 2)."""
@@ -3551,7 +3683,7 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.type = 0
+        self.type = ClientConfigureRequest_RpcType()
         self.key = String()
         self.value = String()
         self._unknown = List[Byte]()
@@ -3565,8 +3697,8 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
         Args:
             writer: Destination wire-format writer.
         """
-        if self.type != 0:
-            writer.int32(1, self.type)
+        if self.type.value != 0:
+            writer.int32(1, self.type.value)
         if self.key.byte_length() != 0:
             writer.string_field(2, self.key)
         if self.value.byte_length() != 0:
@@ -3593,7 +3725,7 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.type = reader.int32_value()
+                    self.type = ClientConfigureRequest_RpcType(value=reader.int32_value())
             elif field == 2:
                 if wire_type != WIRE_LEN:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -3619,14 +3751,14 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
             Error: If a field cannot be written as valid JSON.
         """
         writer.begin_object()
-        if self.type != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.type.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("type", "type")
-            if self.type == 0:
+            if self.type.value == 0:
                 writer.string_value("EMPTY_CALL")
-            elif self.type == 1:
+            elif self.type.value == 1:
                 writer.string_value("UNARY_CALL")
             else:
-                writer.int32_value(self.type)
+                writer.int32_value(self.type.value)
         if self.key.byte_length() != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("key", "key")
             writer.string_value(self.key)
@@ -3660,18 +3792,18 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
                     raise Error("proto json: duplicate field type")
                 seen_1 = True
                 if reader.read_null():
-                    self.type = 0
+                    self.type = ClientConfigureRequest_RpcType()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "EMPTY_CALL":
-                            self.type = 0
+                            self.type = ClientConfigureRequest_RpcType(value=0)
                         elif enum_name.value() == "UNARY_CALL":
-                            self.type = 1
+                            self.type = ClientConfigureRequest_RpcType(value=1)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.type = reader.int32_value()
+                        self.type = ClientConfigureRequest_RpcType(value=reader.int32_value())
             elif field_name == "key" or field_name == "key":
                 if seen_2:
                     raise Error("proto json: duplicate field key")
@@ -3695,7 +3827,7 @@ struct ClientConfigureRequest_Metadata(Copyable, Defaultable, Movable, ProtoMess
 struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `ClientConfigureRequest` protobuf message."""
 
-    var types: List[Int32]
+    var types: List[ClientConfigureRequest_RpcType]
     """Field `types` (number 1, repeated)."""
     var metadata: List[ClientConfigureRequest_Metadata]
     """Field `metadata` (number 2, repeated)."""
@@ -3706,7 +3838,7 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.types = List[Int32]()
+        self.types = List[ClientConfigureRequest_RpcType]()
         self.metadata = List[ClientConfigureRequest_Metadata]()
         self.timeout_sec = 0
         self._unknown = List[Byte]()
@@ -3723,7 +3855,7 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
         if len(self.types) != 0:
             var sub = WireWriter()
             for v in self.types:
-                sub.varint(UInt64(Int64(v)))
+                sub.varint(UInt64(Int64(v.value)))
             writer.len_prefixed(1, Span(sub.buf))
         for v in self.metadata:
             var sub = WireWriter()
@@ -3753,9 +3885,9 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
                 if wire_type == WIRE_LEN:
                     var sub = reader.sub_reader()
                     while not sub.done():
-                        self.types.append(sub.int32_value())
+                        self.types.append(ClientConfigureRequest_RpcType(value=sub.int32_value()))
                 elif wire_type == WIRE_VARINT:
-                    self.types.append(reader.int32_value())
+                    self.types.append(ClientConfigureRequest_RpcType(value=reader.int32_value()))
                 else:
                     reader.capture_field(field, wire_type, self._unknown)
             elif field == 2:
@@ -3791,12 +3923,12 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
             writer.begin_array()
             for item in self.types:
                 writer.array_item()
-                if item == 0:
+                if item.value == 0:
                     writer.string_value("EMPTY_CALL")
-                elif item == 1:
+                elif item.value == 1:
                     writer.string_value("UNARY_CALL")
                 else:
-                    writer.int32_value(item)
+                    writer.int32_value(item.value)
             writer.end_array()
         if len(self.metadata) != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("metadata", "metadata")
@@ -3835,9 +3967,9 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
                     raise Error("proto json: duplicate field types")
                 seen_1 = True
                 if reader.read_null():
-                    self.types = List[Int32]()
+                    self.types = List[ClientConfigureRequest_RpcType]()
                 else:
-                    self.types = List[Int32]()
+                    self.types = List[ClientConfigureRequest_RpcType]()
                     reader.begin_array()
                     while reader.next_array_item():
                         if reader.read_null():
@@ -3845,13 +3977,13 @@ struct ClientConfigureRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
                         var enum_name = reader.enum_name()
                         if enum_name:
                             if enum_name.value() == "EMPTY_CALL":
-                                self.types.append(0)
+                                self.types.append(ClientConfigureRequest_RpcType(value=0))
                             elif enum_name.value() == "UNARY_CALL":
-                                self.types.append(1)
+                                self.types.append(ClientConfigureRequest_RpcType(value=1))
                             elif not reader.options.ignore_unknown_fields:
                                 raise Error("proto json: unknown enum value")
                         else:
-                            self.types.append(reader.int32_value())
+                            self.types.append(ClientConfigureRequest_RpcType(value=reader.int32_value()))
             elif field_name == "metadata" or field_name == "metadata":
                 if seen_2:
                     raise Error("proto json: duplicate field metadata")
@@ -4401,23 +4533,63 @@ struct SetReturnStatusRequest(Copyable, Defaultable, Movable, ProtoMessage, Prot
                 reader.skip_unknown_value()
 
 
-struct HookRequest_HookRequestCommand:
-    """Values of the `HookRequestCommand` protobuf enum (fields carry `Int32`)."""
+struct HookRequest_HookRequestCommand(Copyable, ImplicitlyCopyable, Movable, Equatable):
+    """Proto3 open enum `HookRequestCommand`. Unknown numeric values are preserved."""
 
-    comptime UNSPECIFIED = 0
+    var value: Int32
+    """The wire number, including values not named in the .proto."""
+
+    comptime UNSPECIFIED: Int32 = 0
     """`UNSPECIFIED` = 0."""
-    comptime START = 1
+    comptime START: Int32 = 1
     """`START` = 1."""
-    comptime STOP = 2
+    comptime STOP: Int32 = 2
     """`STOP` = 2."""
-    comptime RETURN = 3
+    comptime RETURN: Int32 = 3
     """`RETURN` = 3."""
+
+    def __init__(out self, value: Int32 = 0):
+        """Wraps a proto3 enum number, including unknown values.
+
+        Args:
+            value: The wire number. Defaults to 0 (the unspecified value).
+        """
+        self.value = value
+
+    def __eq__(self, other: Self) -> Bool:
+        """Compares two enum wrappers by wire number."""
+        return self.value == other.value
+
+    def name(self) -> Optional[String]:
+        """Returns the first declared name for this number, or None if unknown."""
+        if self.value == 0:
+            return String("UNSPECIFIED")
+        elif self.value == 1:
+            return String("START")
+        elif self.value == 2:
+            return String("STOP")
+        elif self.value == 3:
+            return String("RETURN")
+        return None
+
+    @staticmethod
+    def from_name(name: StringSpan) -> Optional[Self]:
+        """Looks up a declared name. Unknown names return None."""
+        if name == "UNSPECIFIED":
+            return Self(value=0)
+        elif name == "START":
+            return Self(value=1)
+        elif name == "STOP":
+            return Self(value=2)
+        elif name == "RETURN":
+            return Self(value=3)
+        return None
 
 
 struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
     """Generated from the `HookRequest` protobuf message."""
 
-    var command: Int32
+    var command: HookRequest_HookRequestCommand
     """Field `command` (number 1)."""
     var grpc_code_to_return: Int32
     """Field `grpc_code_to_return` (number 2)."""
@@ -4430,7 +4602,7 @@ struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessag
 
     def __init__(out self):
         """Initializes all fields to their proto3 defaults."""
-        self.command = 0
+        self.command = HookRequest_HookRequestCommand()
         self.grpc_code_to_return = 0
         self.grpc_status_description = String()
         self.server_port = 0
@@ -4445,8 +4617,8 @@ struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessag
         Args:
             writer: Destination wire-format writer.
         """
-        if self.command != 0:
-            writer.int32(1, self.command)
+        if self.command.value != 0:
+            writer.int32(1, self.command.value)
         if self.grpc_code_to_return != 0:
             writer.int32(2, self.grpc_code_to_return)
         if self.grpc_status_description.byte_length() != 0:
@@ -4475,7 +4647,7 @@ struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessag
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
                 else:
-                    self.command = reader.int32_value()
+                    self.command = HookRequest_HookRequestCommand(value=reader.int32_value())
             elif field == 2:
                 if wire_type != WIRE_VARINT:
                     reader.capture_field(field, wire_type, self._unknown)
@@ -4506,18 +4678,18 @@ struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessag
             Error: If a field cannot be written as valid JSON.
         """
         writer.begin_object()
-        if self.command != 0 or writer.options.always_print_fields_with_no_presence:
+        if self.command.value != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("command", "command")
-            if self.command == 0:
+            if self.command.value == 0:
                 writer.string_value("UNSPECIFIED")
-            elif self.command == 1:
+            elif self.command.value == 1:
                 writer.string_value("START")
-            elif self.command == 2:
+            elif self.command.value == 2:
                 writer.string_value("STOP")
-            elif self.command == 3:
+            elif self.command.value == 3:
                 writer.string_value("RETURN")
             else:
-                writer.int32_value(self.command)
+                writer.int32_value(self.command.value)
         if self.grpc_code_to_return != 0 or writer.options.always_print_fields_with_no_presence:
             writer.field("grpcCodeToReturn", "grpc_code_to_return")
             writer.int32_value(self.grpc_code_to_return)
@@ -4555,22 +4727,22 @@ struct HookRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessag
                     raise Error("proto json: duplicate field command")
                 seen_1 = True
                 if reader.read_null():
-                    self.command = 0
+                    self.command = HookRequest_HookRequestCommand()
                 else:
                     var enum_name = reader.enum_name()
                     if enum_name:
                         if enum_name.value() == "UNSPECIFIED":
-                            self.command = 0
+                            self.command = HookRequest_HookRequestCommand(value=0)
                         elif enum_name.value() == "START":
-                            self.command = 1
+                            self.command = HookRequest_HookRequestCommand(value=1)
                         elif enum_name.value() == "STOP":
-                            self.command = 2
+                            self.command = HookRequest_HookRequestCommand(value=2)
                         elif enum_name.value() == "RETURN":
-                            self.command = 3
+                            self.command = HookRequest_HookRequestCommand(value=3)
                         elif not reader.options.ignore_unknown_fields:
                             raise Error("proto json: unknown enum value")
                     else:
-                        self.command = reader.int32_value()
+                        self.command = HookRequest_HookRequestCommand(value=reader.int32_value())
             elif field_name == "grpcCodeToReturn" or field_name == "grpc_code_to_return":
                 if seen_2:
                     raise Error("proto json: duplicate field grpcCodeToReturn")

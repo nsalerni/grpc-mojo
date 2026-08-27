@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin source and package tests to protomojo v0.4.0. Generated enum fields
+  are Equatable wrapper structs (`value`, `name()`, `from_name()`).
 - `GrpcChannel.connect_tls`, `Server.tls`, and `PollingServer.tls` take
   `StringSpan` for SNI and filesystem paths, matching `connect` / `unix`.
   Values are copied to `String` at the TLS FFI boundary.
