@@ -674,6 +674,9 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
 
     Holds an untracked pointer to the `GrpcChannel` that started the call.
     Do not store it after the channel is closed or moved.
+
+    Parameters:
+        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -682,6 +685,23 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
     """The HTTP/2 stream id of this call."""
     var _recv_done: Bool
     """True after the response stream has ended."""
+
+    def __init__(
+        out self,
+        _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
+        sid: UInt32,
+        _recv_done: Bool,
+    ):
+        """Stores the channel pointer and stream id.
+
+        Args:
+            _channel: Untracked pointer to the owning channel.
+            sid: The HTTP/2 stream id of this call.
+            _recv_done: True after the response stream has ended.
+        """
+        self._channel = _channel
+        self.sid = sid
+        self._recv_done = _recv_done
 
     @staticmethod
     def start[
@@ -719,7 +739,7 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
             _recv_done=False,
         )
 
-    def recv(mut self) raises -> Optional[Resp]:
+    def recv(mut self) raises -> Optional[Self.Resp]:
         """Receives the next response message; None when the stream ends.
 
         Returns:
@@ -731,7 +751,7 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         """
         if self._recv_done:
             return None
-        var msg = self._channel[].recv_msg[Resp](self.sid)
+        var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         if not msg:
             self._recv_done = True
         return msg^
@@ -759,6 +779,10 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
 
     Holds an untracked pointer to the `GrpcChannel` that started the call.
     Do not store it after the channel is closed or moved.
+
+    Parameters:
+        Req: The request message type.
+        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -767,6 +791,23 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """The HTTP/2 stream id of this call."""
     var _send_closed: Bool
     """True after `close_send` or `finish` half-closed the request stream."""
+
+    def __init__(
+        out self,
+        _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
+        sid: UInt32,
+        _send_closed: Bool,
+    ):
+        """Stores the channel pointer and stream id.
+
+        Args:
+            _channel: Untracked pointer to the owning channel.
+            sid: The HTTP/2 stream id of this call.
+            _send_closed: True after the request stream is half-closed.
+        """
+        self._channel = _channel
+        self.sid = sid
+        self._send_closed = _send_closed
 
     @staticmethod
     def start(
@@ -792,7 +833,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             _send_closed=False,
         )
 
-    def send(mut self, msg: Req) raises:
+    def send(mut self, msg: Self.Req) raises:
         """Sends one request message.
 
         Args:
@@ -804,7 +845,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._send_closed:
             raise Error("grpc: send after close_send")
-        self._channel[].send_msg[Req](self.sid, msg, last=False)
+        self._channel[].send_msg[Self.Req](self.sid, msg, last=False)
 
     def close_send(mut self) raises:
         """Half-closes the request stream without sending a message."""
@@ -813,7 +854,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         self._channel[].close_send(self.sid)
         self._send_closed = True
 
-    def finish(mut self) raises -> Resp:
+    def finish(mut self) raises -> Self.Resp:
         """Half-closes if needed, receives the response, and checks status.
 
         Returns:
@@ -824,7 +865,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             no response message.
         """
         self.close_send()
-        var msg = self._channel[].recv_msg[Resp](self.sid)
+        var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         var result = self._channel[].finish(self.sid)
         if not result.status.is_ok():
             raise result.status.to_error()
@@ -846,6 +887,10 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     1.0 does not expose. Holds an untracked pointer to the `GrpcChannel`
     that started the call; do not store it after the channel is closed or
     moved.
+
+    Parameters:
+        Req: The request message type.
+        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -856,6 +901,26 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """True after `close_send` half-closed the request stream."""
     var _recv_done: Bool
     """True after the response stream has ended."""
+
+    def __init__(
+        out self,
+        _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
+        sid: UInt32,
+        _send_closed: Bool,
+        _recv_done: Bool,
+    ):
+        """Stores the channel pointer and stream id.
+
+        Args:
+            _channel: Untracked pointer to the owning channel.
+            sid: The HTTP/2 stream id of this call.
+            _send_closed: True after the request stream is half-closed.
+            _recv_done: True after the response stream has ended.
+        """
+        self._channel = _channel
+        self.sid = sid
+        self._send_closed = _send_closed
+        self._recv_done = _recv_done
 
     @staticmethod
     def start(
@@ -882,7 +947,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             _recv_done=False,
         )
 
-    def send(mut self, msg: Req, *, last: Bool = False) raises:
+    def send(mut self, msg: Self.Req, *, last: Bool = False) raises:
         """Sends one request message.
 
         Args:
@@ -896,11 +961,11 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._send_closed:
             raise Error("grpc: send after close_send")
-        self._channel[].send_msg[Req](self.sid, msg, last=last)
+        self._channel[].send_msg[Self.Req](self.sid, msg, last=last)
         if last:
             self._send_closed = True
 
-    def recv(mut self) raises -> Optional[Resp]:
+    def recv(mut self) raises -> Optional[Self.Resp]:
         """Receives the next response message; None when the stream ends.
 
         Returns:
@@ -912,7 +977,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._recv_done:
             return None
-        var msg = self._channel[].recv_msg[Resp](self.sid)
+        var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         if not msg:
             self._recv_done = True
         return msg^
