@@ -21,11 +21,9 @@ is the live list.
 
 ### Open (not blocked on Mojo or another package)
 
-- Comparative benchmarks vs grpcio and tonic (unary QPS, streaming
-  throughput, p99). Local `bench/bench_grpc.mojo` already exists; a
-  published comparison is still to write.
 - Broader structured fuzz of framing and HPACK beyond the existing
-  compliance harness (Track B5).
+  compliance harness (Track B5). That expansion lands in mojo-http2's
+  randomized suites; this repo consumes them through `fetch_deps`.
 
 ### Blocked on Mojo 1.0
 
@@ -148,9 +146,10 @@ the outer gate (keep ours — it runs in seconds).
 
 ### B5. Fuzzing + benchmarks *(M, ongoing)*
 Structured differential fuzzers (Python-driven, seeded — extend the
-existing compliance harness) for varint/frame/HPACK decoders; benchmark
-suite vs grpcio and tonic (unary QPS, streaming throughput, p99) using
-`std.benchmark`.
+existing compliance harness) for varint/frame/HPACK decoders. Comparative
+loopback benches vs grpcio and tonic (unary 11B, unary 64KiB, bidi
+ping-pong, mean and p99) are in `bench/compare.py` and
+[BENCHMARKS.md](BENCHMARKS.md). Do not git-diff nanoseconds.
 
 ---
 

@@ -128,6 +128,9 @@ jobs:
       - name: Benchmarks (smoke)
         run: pixi run bench-smoke
 
+      - name: Comparative benches (smoke)
+        run: pixi run bench-compare-smoke
+
       - name: Official gRPC interop cases (both directions vs grpcio)
         run: pixi run interop-official
 
