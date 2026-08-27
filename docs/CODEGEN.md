@@ -39,7 +39,7 @@ output directory on the include path (`-I OUT_DIR`).
 | `bool` | `Bool` | |
 | `string` | `String` | UTF-8 validated on decode |
 | `bytes` | `List[Byte]` | |
-| `enum E` | wrapper struct `E` with `var value: Int32`, `comptime` constants, `name()`, and `from_name()` | proto3 open-enum: unknown numbers round-trip. Published protomojo 0.3.0 still emits `Int32` plus constants; regenerate after the wrapper release. |
+| `enum E` | wrapper struct `E` with `var value: Int32`, `comptime` constants, `name()`, and `from_name()` | proto3 open-enum: unknown numbers round-trip. Requires protomojo 0.4.0. |
 | message `M` (singular) | `Optional[M]` | presence tracked |
 | `optional` scalar (proto3) | `Optional[T]` | explicit presence: set values encode even at default |
 | `repeated` scalar | `List[T]` | packed by default; `[packed = false]` honored; decoder accepts both |

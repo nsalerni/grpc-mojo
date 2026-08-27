@@ -34,9 +34,6 @@ is the live list.
   `initial_window_size` in mojo-http2. This repo pins a published http2
   release, so the gRPC constructors cannot advertise a non-default window
   until that package tags a release that includes the knob.
-- **Typed enum fields in generated gRPC messages.** Enum wrappers land in
-  protomojo first. `echo.proto` has no enums; regenerate message stubs
-  after protomojo tags a release that emits the wrapper structs.
 
 ### Blocked on Mojo 1.0
 
@@ -111,8 +108,7 @@ previous deadline.
   (`Timestamp`, `Duration`, …), then ships helpers for them.
 - proto3 `optional` → real presence via `Optional[T]` fields.
 - Typed enums (struct wrapper with `Equatable`, name lookup) instead of
-  bare `Int32` — implemented in protomojo; grpc stubs regenerate after
-  that package tags a release.
+  bare `Int32` — shipped; generated stubs use protomojo 0.4.0 wrappers.
 - Server-side registration codegen: `register_echo_service[handlers...]`
   companion to the client stub.
 
@@ -232,7 +228,7 @@ Ordered by leverage-per-effort:
 |---|---|---|---|
 | **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · bug report / PRs / extraction pending |
 | **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming (including typed client call objects) · ✅ deadlines/cancel · ✅ interop 72/72 across h2c, TLS, and Unix sockets · ✅ h2spec 146/146 · flood guards pending |
-| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields); typed enums in protomojo, grpc regen after that release; ✅ conformance 1476/1476 for proto3 binary and JSON; gzip blocked on a 1.0-compatible zlib package |
+| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields, typed enums); ✅ conformance 1476/1476 for proto3 binary and JSON; gzip blocked on a 1.0-compatible zlib package |
 | **4. Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | TLS interop ✅ · bounded unary h2c and TLS polling ✅ · A5 max-message + PollingServer keepalive ✅ · parallel handlers, GOAWAY drain, and blocking-server keepalive blocked on Mojo threads/async |
 
 **Definition of "100% compatible", concretely:** official gRPC interop
