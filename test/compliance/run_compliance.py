@@ -649,15 +649,16 @@ def section_grpc_client(tmp: Path):
         record("grpc", "rich error model: grpc-status-details-bin decoded from grpcio",
                rich_ok, r.stdout.strip())
 
-        t0 = time.monotonic()
         r = run_tool("grpc_client_probe", port, "sleep", 300)
-        took = time.monotonic() - t0
-        # run_tool uses `mojo run`, so this includes probe compile. Ubuntu
-        # CI is about 3.7s compile plus the 300ms deadline. The server
-        # sleeps 5s, so 4.5s still fails a missed deadline.
+        # Time the RPC inside the probe so `mojo run` compile is not part
+        # of the bound. Ubuntu CI compile is ~3.7s; a 300ms deadline then
+        # trips any wall-clock cutoff near 4s. The server sleeps 5s, so
+        # 2000ms still fails a missed deadline.
+        m = re.search(r"took_ms=(\d+)", r.stdout)
+        took_ms = int(m.group(1)) if m else None
         record("grpc", "client deadline enforced vs sleeping server (300ms -> DEADLINE_EXCEEDED)",
-               "code=4" in r.stdout and took < 4.5,
-               f"out={r.stdout.strip()!r} took={took:.2f}s")
+               "code=4" in r.stdout and took_ms is not None and took_ms < 2000,
+               f"out={r.stdout.strip()!r}")
     finally:
         server.stop(0)
 
