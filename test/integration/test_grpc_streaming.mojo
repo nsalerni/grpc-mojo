@@ -232,6 +232,36 @@ def test_typed_bidi_call() raises:
     rig.server_conn.close()
 
 
+def test_typed_call_keeps_own_deadline() raises:
+    var rig = make_rig()
+    var first = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="a"),
+        timeout_ns=5_000_000_000,
+    )
+    var first_deadline = first._deadline_ns
+    assert_true(first_deadline != 0, "first call stored a deadline")
+    assert_equal(rig.channel.deadline_ns, first_deadline)
+    var second = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="b"),
+        timeout_ns=1_000_000_000,
+    )
+    assert_true(second._deadline_ns != 0, "second call stored a deadline")
+    assert_true(
+        first._deadline_ns != second._deadline_ns,
+        "overlapping timed calls keep independent deadlines",
+    )
+    assert_equal(rig.channel.deadline_ns, second._deadline_ns)
+    assert_equal(first._deadline_ns, first_deadline)
+    first.cancel()
+    second.cancel()
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_streaming_handler_error() raises:
     var rig = make_rig()
     var sid = rig.channel.start_call("/echo.Echo/FailStream", Metadata())
@@ -261,5 +291,6 @@ def main() raises:
     test_typed_server_streaming_call()
     test_typed_client_streaming_call()
     test_typed_bidi_call()
+    test_typed_call_keeps_own_deadline()
     test_streaming_handler_error()
     print("test_grpc_streaming: all tests passed")

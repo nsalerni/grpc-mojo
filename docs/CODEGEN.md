@@ -67,10 +67,14 @@ For each service the plugin emits:
 
 - `comptime <SERVICE>_<METHOD>_PATH` constants,
 - a `<Service>Client` struct wrapping `GrpcChannel` — unary methods make the
-  full call; streaming methods return typed call objects
-  (`ServerStreamingCall[Resp]`, `ClientStreamingCall[Req, Resp]`,
-  `BidiStreamingCall[Req, Resp]`) with `send` / `recv` / `close_send` /
-  `finish`,
+  full call; streaming methods return typed call objects:
+
+| Call type | Methods |
+|---|---|
+| `ServerStreamingCall[Resp]` | `recv`, `finish`, `cancel` |
+| `ClientStreamingCall[Req, Resp]` | `send`, `close_send`, `finish`, `cancel` |
+| `BidiStreamingCall[Req, Resp]` | `send`, `recv`, `close_send`, `finish`, `cancel` |
+
 - an `add_<service>_service[...](mut server)` helper that registers one
   compile-time handler per method with the right kind
   (`register_unary` / `register_server_streaming` /

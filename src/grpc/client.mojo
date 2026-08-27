@@ -21,7 +21,10 @@ Deadlines are enforced client-side: `start_call(timeout_ns=...)` sends the
 `grpc-timeout` header and records an absolute monotonic deadline, receive
 paths arm the socket read timeout (SO_RCVTIMEO) with the remaining budget,
 and on expiry the call is cancelled with RST_STREAM(CANCEL) and surfaces
-`DEADLINE_EXCEEDED`.
+`DEADLINE_EXCEEDED`. Typed call objects copy that deadline and restore it
+before `recv` / `finish`, so overlapping timed calls on one channel keep
+independent budgets. The raw `start_call` API still has one channel-level
+deadline; a later `start_call` replaces it.
 """
 
 from std.time import monotonic
@@ -82,7 +85,11 @@ struct GrpcChannel(Movable):
     var scheme: String
     """Value for the `:scheme` pseudo-header (`http` or `https`)."""
     var deadline_ns: Int64
-    """Absolute monotonic deadline for the current call; 0 = none."""
+    """Absolute monotonic deadline armed on the next receive; 0 = none.
+
+    `start_call` writes this field. Typed call objects copy it onto the
+    handle and restore it before `recv` / `finish`.
+    """
     var max_message_size: Int
     """Maximum serialized request or response size, default 4 MiB."""
 
@@ -281,7 +288,9 @@ struct GrpcChannel(Movable):
         Sends the pseudo-headers, `te: trailers`, `content-type:
         application/grpc+proto`, the user agent, an optional `grpc-timeout`,
         and the caller's custom metadata. With a timeout, the channel also
-        records an absolute deadline that the receive paths enforce.
+        records an absolute deadline that the receive paths enforce. A later
+        `start_call` replaces that channel-level deadline; typed call
+        objects copy it at start and restore it before they receive.
 
         Args:
             path: Full method path, e.g. `/echo.Echo/Say`.
@@ -690,6 +699,8 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
     """Untracked pointer to the owning channel; valid only while it lives."""
     var sid: UInt32
     """The HTTP/2 stream id of this call."""
+    var _deadline_ns: Int64
+    """Absolute monotonic deadline copied from the channel at start; 0 = none."""
     var _recv_done: Bool
     """True after the response stream has ended."""
 
@@ -697,17 +708,20 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         out self,
         _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
         sid: UInt32,
+        _deadline_ns: Int64,
         _recv_done: Bool,
     ):
-        """Stores the channel pointer and stream id.
+        """Stores the channel pointer, stream id, and call deadline.
 
         Args:
             _channel: Untracked pointer to the owning channel.
             sid: The HTTP/2 stream id of this call.
+            _deadline_ns: Absolute monotonic deadline; 0 means none.
             _recv_done: True after the response stream has ended.
         """
         self._channel = _channel
         self.sid = sid
+        self._deadline_ns = _deadline_ns
         self._recv_done = _recv_done
 
     @staticmethod
@@ -743,6 +757,7 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         return Self(
             _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
             sid=sid,
+            _deadline_ns=channel.deadline_ns,
             _recv_done=False,
         )
 
@@ -758,6 +773,7 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         """
         if self._recv_done:
             return None
+        self._channel[].deadline_ns = self._deadline_ns
         var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         if not msg:
             self._recv_done = True
@@ -773,6 +789,7 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         Raises:
             On connection I/O or HTTP/2 protocol errors.
         """
+        self._channel[].deadline_ns = self._deadline_ns
         return self._channel[].finish(self.sid)
 
     def cancel(mut self) raises:
@@ -800,6 +817,8 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Untracked pointer to the owning channel; valid only while it lives."""
     var sid: UInt32
     """The HTTP/2 stream id of this call."""
+    var _deadline_ns: Int64
+    """Absolute monotonic deadline copied from the channel at start; 0 = none."""
     var _send_closed: Bool
     """True after `close_send` or `finish` half-closed the request stream."""
 
@@ -807,17 +826,20 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         out self,
         _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
         sid: UInt32,
+        _deadline_ns: Int64,
         _send_closed: Bool,
     ):
-        """Stores the channel pointer and stream id.
+        """Stores the channel pointer, stream id, and call deadline.
 
         Args:
             _channel: Untracked pointer to the owning channel.
             sid: The HTTP/2 stream id of this call.
+            _deadline_ns: Absolute monotonic deadline; 0 means none.
             _send_closed: True after the request stream is half-closed.
         """
         self._channel = _channel
         self.sid = sid
+        self._deadline_ns = _deadline_ns
         self._send_closed = _send_closed
 
     @staticmethod
@@ -841,6 +863,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         return Self(
             _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
             sid=sid,
+            _deadline_ns=channel.deadline_ns,
             _send_closed=False,
         )
 
@@ -880,6 +903,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             no response message.
         """
         self.close_send()
+        self._channel[].deadline_ns = self._deadline_ns
         var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         var result = self._channel[].finish(self.sid)
         if not result.status.is_ok():
@@ -916,6 +940,8 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Untracked pointer to the owning channel; valid only while it lives."""
     var sid: UInt32
     """The HTTP/2 stream id of this call."""
+    var _deadline_ns: Int64
+    """Absolute monotonic deadline copied from the channel at start; 0 = none."""
     var _send_closed: Bool
     """True after `close_send` half-closed the request stream."""
     var _recv_done: Bool
@@ -925,19 +951,22 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         out self,
         _channel: Pointer[GrpcChannel, MutUntrackedOrigin],
         sid: UInt32,
+        _deadline_ns: Int64,
         _send_closed: Bool,
         _recv_done: Bool,
     ):
-        """Stores the channel pointer and stream id.
+        """Stores the channel pointer, stream id, and call deadline.
 
         Args:
             _channel: Untracked pointer to the owning channel.
             sid: The HTTP/2 stream id of this call.
+            _deadline_ns: Absolute monotonic deadline; 0 means none.
             _send_closed: True after the request stream is half-closed.
             _recv_done: True after the response stream has ended.
         """
         self._channel = _channel
         self.sid = sid
+        self._deadline_ns = _deadline_ns
         self._send_closed = _send_closed
         self._recv_done = _recv_done
 
@@ -962,6 +991,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         return Self(
             _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
             sid=sid,
+            _deadline_ns=channel.deadline_ns,
             _send_closed=False,
             _recv_done=False,
         )
@@ -996,6 +1026,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._recv_done:
             return None
+        self._channel[].deadline_ns = self._deadline_ns
         var msg = self._channel[].recv_msg[Self.Resp](self.sid)
         if not msg:
             self._recv_done = True
@@ -1022,6 +1053,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         Raises:
             On connection I/O or HTTP/2 protocol errors.
         """
+        self._channel[].deadline_ns = self._deadline_ns
         return self._channel[].finish(self.sid)
 
     def cancel(mut self) raises:
