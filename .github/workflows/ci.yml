@@ -128,9 +128,6 @@ jobs:
       - name: Benchmarks (smoke)
         run: pixi run bench-smoke
 
-      - name: Comparative benches (smoke)
-        run: pixi run bench-compare-smoke
-
       - name: Official gRPC interop cases (both directions vs grpcio)
         run: pixi run interop-official
 
@@ -145,6 +142,9 @@ jobs:
           export LD_LIBRARY_PATH="$HOME/conformance:${LD_LIBRARY_PATH:-}"
           export DYLD_LIBRARY_PATH="$HOME/conformance:${DYLD_LIBRARY_PATH:-}"
           CONFORMANCE_RUNNER="$HOME/conformance/conformance_test_runner" pixi run compliance
+
+      - name: Comparative benches (smoke)
+        run: pixi run bench-compare-smoke
 
       - name: Upload compliance report
         if: always()
