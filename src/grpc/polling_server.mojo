@@ -571,11 +571,11 @@ struct PollingServer(Movable):
     def tls(
         host: StringSpan,
         port: UInt16,
-        cert_chain_pem: String,
-        key_pem: String,
+        cert_chain_pem: StringSpan,
+        key_pem: StringSpan,
         config: PollingServerConfig = PollingServerConfig(),
         *,
-        client_ca_file: String = "",
+        client_ca_file: StringSpan = "",
         require_client_cert: Bool = False,
     ) raises -> PollingServer:
         """Constructs a TLS polling server that accepts only `h2` ALPN.
@@ -602,10 +602,10 @@ struct PollingServer(Movable):
         """
         var out = PollingServer(host, port, config)
         out._tls_context = TLSContext.server(
-            cert_chain_pem,
-            key_pem,
+            String(cert_chain_pem),
+            String(key_pem),
             alpn=[String(H2_ALPN)],
-            client_ca_file=client_ca_file,
+            client_ca_file=String(client_ca_file),
             require_client_cert=require_client_cert,
         )
         return out^

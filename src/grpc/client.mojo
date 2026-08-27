@@ -154,10 +154,10 @@ struct GrpcChannel(Movable):
         host: StringSpan,
         port: UInt16,
         *,
-        server_name: String = "",
-        ca_file: String = "",
-        cert_chain_pem: String = "",
-        key_pem: String = "",
+        server_name: StringSpan = "",
+        ca_file: StringSpan = "",
+        cert_chain_pem: StringSpan = "",
+        key_pem: StringSpan = "",
     ) raises -> GrpcChannel:
         """Opens a verified TLS connection with mandatory `h2` ALPN.
 
@@ -181,14 +181,14 @@ struct GrpcChannel(Movable):
         """
         var context = TLSContext.client(
             verify=True,
-            ca_file=ca_file,
-            cert_chain_pem=cert_chain_pem,
-            key_pem=key_pem,
+            ca_file=String(ca_file),
+            cert_chain_pem=String(cert_chain_pem),
+            key_pem=String(key_pem),
             alpn=[String("h2")],
         )
         var tcp = TCPStream.connect(host, port)
-        var name = server_name
-        if name == "":
+        var name = String(server_name)
+        if name.byte_length() == 0:
             name = String(host)
         var tls = context.connect(tcp^, name)
         if tls.negotiated_alpn() != "h2":
