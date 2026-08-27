@@ -21,7 +21,15 @@ from proto import (
     ProtoJsonReader,
     ProtoJsonWriter,
 )
-from grpc import GrpcChannel, Metadata, Server, ServerCall, ServerContext
+from grpc import (
+    BidiStreamingCall,
+    ClientStreamingCall,
+    GrpcChannel,
+    Server,
+    ServerCall,
+    ServerContext,
+    ServerStreamingCall,
+)
 
 
 struct EchoRequest(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
@@ -233,7 +241,7 @@ struct EchoClient(Movable):
     """Generated client for the `echo.Echo` service."""
 
     var channel: GrpcChannel
-    """The underlying channel; usable directly for streaming calls."""
+    """The underlying channel; usable directly for low-level streaming."""
 
     @staticmethod
     def connect(host: StringSpan, port: UInt16) raises -> EchoClient:
@@ -268,81 +276,64 @@ struct EchoClient(Movable):
             ECHO_SAY_PATH, request, timeout_ns=timeout_ns
         )
 
-    def split(mut self, request: EchoRequest, *, timeout_ns: Int64 = 0) raises -> UInt32:
+    def split(mut self, request: EchoRequest, *, timeout_ns: Int64 = 0) raises -> ServerStreamingCall[EchoResponse]:
         """Starts the server-streaming `Split` method.
 
-        Receive with `channel.recv_msg[EchoResponse](sid)` until it
-        returns `None`, then call `channel.finish(sid)`.
+        Receive with `call.recv()` until it returns `None`,
+        then call `call.finish()`.
 
         Args:
             request: The request message.
             timeout_ns: Call deadline in nanoseconds; 0 means none.
 
         Returns:
-            The stream id of the started call.
+            A typed handle for the response stream.
 
         Raises:
             Error: If the call cannot be started.
         """
-        var sid = self.channel.start_call(ECHO_SPLIT_PATH, Metadata(), timeout_ns=timeout_ns)
-        self.channel.send_msg[EchoRequest](sid, request, last=True)
-        return sid
+        return ServerStreamingCall[EchoResponse].start[EchoRequest](
+            self.channel, ECHO_SPLIT_PATH, request, timeout_ns=timeout_ns
+        )
 
-    def join_start(mut self, *, timeout_ns: Int64 = 0) raises -> UInt32:
+    def join(mut self, *, timeout_ns: Int64 = 0) raises -> ClientStreamingCall[EchoRequest, EchoResponse]:
         """Starts the client-streaming `Join` method.
 
-        Send with `channel.send_msg[EchoRequest](sid, m)`, half-close with
-        `channel.close_send(sid)`, then call `join_finish`.
+        Send with `call.send(msg)`, then `call.finish()` to
+        half-close and read the response.
 
         Args:
             timeout_ns: Call deadline in nanoseconds; 0 means none.
 
         Returns:
-            The stream id of the started call.
+            A typed handle for the request stream.
 
         Raises:
             Error: If the call cannot be started.
         """
-        return self.channel.start_call(ECHO_JOIN_PATH, Metadata(), timeout_ns=timeout_ns)
+        return ClientStreamingCall[EchoRequest, EchoResponse].start(
+            self.channel, ECHO_JOIN_PATH, timeout_ns=timeout_ns
+        )
 
-    def join_finish(mut self, sid: UInt32) raises -> EchoResponse:
-        """Receives the response and completes the call.
-
-        Args:
-            sid: Stream id returned by the start method.
-
-        Returns:
-            The response message.
-
-        Raises:
-            Error: If the call ends with a non-OK status or without
-                a response message.
-        """
-        var msg = self.channel.recv_msg[EchoResponse](sid)
-        var result = self.channel.finish(sid)
-        if not result.status.is_ok():
-            raise result.status.to_error()
-        if not msg:
-            raise Error("grpc: missing response message")
-        return msg.take()
-
-    def chat_start(mut self, *, timeout_ns: Int64 = 0) raises -> UInt32:
+    def chat(mut self, *, timeout_ns: Int64 = 0) raises -> BidiStreamingCall[EchoRequest, EchoResponse]:
         """Starts the bidirectional `Chat` method.
 
-        Exchange with `channel.send_msg[EchoRequest]` and
-        `channel.recv_msg[EchoResponse]` (ping-pong style), half-close
-        with `channel.close_send(sid)`, then `channel.finish(sid)`.
+        Exchange with `call.send` and `call.recv` (ping-pong
+        style), half-close with `call.close_send()`, then
+        `call.finish()`.
 
         Args:
             timeout_ns: Call deadline in nanoseconds; 0 means none.
 
         Returns:
-            The stream id of the started call.
+            A typed handle for both streams.
 
         Raises:
             Error: If the call cannot be started.
         """
-        return self.channel.start_call(ECHO_CHAT_PATH, Metadata(), timeout_ns=timeout_ns)
+        return BidiStreamingCall[EchoRequest, EchoResponse].start(
+            self.channel, ECHO_CHAT_PATH, timeout_ns=timeout_ns
+        )
 
     def close(mut self):
         """Closes the underlying connection."""

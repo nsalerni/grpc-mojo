@@ -6,12 +6,15 @@ from std.testing import assert_equal, assert_true
 
 from h2 import Http2Connection
 from grpc import (
+    BidiStreamingCall,
+    ClientStreamingCall,
     GrpcChannel,
     GrpcTransport,
     Metadata,
     Server,
     ServerCall,
     ServerContext,
+    ServerStreamingCall,
     StatusCode,
 )
 from net import TCPStream, TCPListener
@@ -165,6 +168,70 @@ def test_bidi_sequenced() raises:
     rig.server_conn.close()
 
 
+def test_typed_server_streaming_call() raises:
+    var rig = make_rig()
+    var call = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="alpha beta gamma"),
+    )
+    rig.pump_server_until_reply()
+
+    var words = List[String]()
+    while True:
+        var msg = call.recv()
+        if not msg:
+            break
+        words.append(msg.value().message.copy())
+    assert_equal(len(words), 3)
+    assert_equal(words[0], "alpha")
+    assert_equal(words[1], "beta")
+    assert_equal(words[2], "gamma")
+    var result = call.finish()
+    assert_true(result.status.is_ok(), "typed server-streaming OK")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_typed_client_streaming_call() raises:
+    var rig = make_rig()
+    var call = ClientStreamingCall[EchoRequest, EchoResponse].start(
+        rig.channel, "/echo.Echo/Join"
+    )
+    for word in ["a", "bb", "ccc"]:
+        call.send(EchoRequest(message=String(word)))
+    call.close_send()
+    rig.pump_server_until_reply()
+    var resp = call.finish()
+    assert_equal(resp.message, "a+bb+ccc")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_typed_bidi_call() raises:
+    var rig = make_rig()
+    var call = BidiStreamingCall[EchoRequest, EchoResponse].start(
+        rig.channel, "/echo.Echo/Chat"
+    )
+    for word in ["x", "y"]:
+        call.send(EchoRequest(message=String(word)))
+    call.close_send()
+    rig.pump_server_until_reply()
+    var got = List[String]()
+    while True:
+        var msg = call.recv()
+        if not msg:
+            break
+        got.append(msg.value().message.copy())
+    assert_equal(len(got), 2)
+    assert_equal(got[0], "pong: x")
+    assert_equal(got[1], "pong: y")
+    var result = call.finish()
+    assert_true(result.status.is_ok(), "typed bidi OK")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_streaming_handler_error() raises:
     var rig = make_rig()
     var sid = rig.channel.start_call("/echo.Echo/FailStream", Metadata())
@@ -191,5 +258,8 @@ def main() raises:
     test_server_streaming()
     test_client_streaming()
     test_bidi_sequenced()
+    test_typed_server_streaming_call()
+    test_typed_client_streaming_call()
+    test_typed_bidi_call()
     test_streaming_handler_error()
     print("test_grpc_streaming: all tests passed")

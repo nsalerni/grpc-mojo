@@ -58,12 +58,20 @@ def main() raises:
     channel.close()
 ```
 
-Streaming calls use `GrpcChannel.start_call`, `send_msg`, `recv_msg`,
-`close_send`, and `finish` on the client, and the `register_*` methods plus
-`ServerCall` on the server.
+Streaming calls use `ServerStreamingCall`, `ClientStreamingCall`, and
+`BidiStreamingCall` (generated stubs return those), or the lower-level
+`GrpcChannel.start_call`, `send_msg`, `recv_msg`, `close_send`, and `finish`
+primitives. Server handlers use the `register_*` methods plus `ServerCall`.
 """
 
-from .client import CallResult, GrpcChannel, GRPC_MOJO_USER_AGENT
+from .client import (
+    BidiStreamingCall,
+    CallResult,
+    ClientStreamingCall,
+    GrpcChannel,
+    GRPC_MOJO_USER_AGENT,
+    ServerStreamingCall,
+)
 from .framing import (
     DEFAULT_MAX_RECV_MESSAGE_SIZE,
     GRPC_MESSAGE_PREFIX_LEN,

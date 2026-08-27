@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added typed streaming client call objects: `ServerStreamingCall`,
+  `ClientStreamingCall`, and `BidiStreamingCall`. Generated service stubs
+  return those handles (`EchoClient.split` / `join` / `chat`). The older
+  `join_start` / `chat_start` names are gone; the lower-level
+  `start_call` / `send_msg` / `recv_msg` / `finish` path remains.
 - `PollingServer` poll timeouts use remaining time until the next keepalive
   PING instead of the full interval, stay gated on the HTTP/2 preface, and
   do not delay an expired idle or RPC deadline with a later PING timer.

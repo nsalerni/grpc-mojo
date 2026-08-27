@@ -12,8 +12,10 @@
 
 `GrpcChannel` multiplexes calls onto a single `Http2Connection`. Unary
 calls go through `unary` (typed, raises on non-OK) or `unary_bytes`
-(returns a full `CallResult`); streaming calls compose the primitives
-`start_call`, `send_msg`, `recv_msg`, `close_send`, and `finish`.
+(returns a full `CallResult`). Streaming calls use `ServerStreamingCall`,
+`ClientStreamingCall`, and `BidiStreamingCall` (generated stubs return
+those), or the lower-level primitives `start_call`, `send_msg`,
+`recv_msg`, `close_send`, and `finish`.
 
 Deadlines are enforced client-side: `start_call(timeout_ns=...)` sends the
 `grpc-timeout` header and records an absolute monotonic deadline, receive
@@ -66,7 +68,8 @@ struct GrpcChannel(Movable):
 
     Owns one HTTP/2 connection and issues calls over it. Create with
     `connect`; make unary calls with `unary`/`unary_bytes`, or drive
-    streaming calls with `start_call`, `send_msg`/`send_request_bytes`,
+    streaming calls with `ServerStreamingCall` / `ClientStreamingCall` /
+    `BidiStreamingCall`, or with `start_call`, `send_msg`/`send_request_bytes`,
     `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
     `set_max_message_size` caps serialized request and response payloads;
     the default is 4 MiB.
@@ -664,3 +667,277 @@ struct GrpcChannel(Movable):
     def close(mut self):
         """Closes the underlying connection; the channel is unusable after."""
         self.conn.close()
+
+
+struct ServerStreamingCall[Resp: ProtoMessage](Movable):
+    """Typed handle for one server-streaming RPC.
+
+    Holds an untracked pointer to the `GrpcChannel` that started the call.
+    Do not store it after the channel is closed or moved.
+    """
+
+    var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
+    """Untracked pointer to the owning channel; valid only while it lives."""
+    var sid: UInt32
+    """The HTTP/2 stream id of this call."""
+    var _recv_done: Bool
+    """True after the response stream has ended."""
+
+    @staticmethod
+    def start[
+        Req: ProtoMessage
+    ](
+        mut channel: GrpcChannel,
+        path: StringSpan,
+        request: Req,
+        *,
+        timeout_ns: Int64 = 0,
+    ) raises -> Self:
+        """Sends the request and returns a handle for response messages.
+
+        Parameters:
+            Req: The request message type.
+
+        Args:
+            channel: The channel that owns the connection.
+            path: Full method path, e.g. `/echo.Echo/Split`.
+            request: The single request message.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            A handle whose `recv` yields response messages.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors, or when the
+            encoded request exceeds `max_message_size`.
+        """
+        var sid = channel.start_call(path, Metadata(), timeout_ns=timeout_ns)
+        channel.send_msg[Req](sid, request, last=True)
+        return Self(
+            _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
+            sid=sid,
+            _recv_done=False,
+        )
+
+    def recv(mut self) raises -> Optional[Resp]:
+        """Receives the next response message; None when the stream ends.
+
+        Returns:
+            The decoded message, or None on end of the response stream.
+
+        Raises:
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            decoding, framing, or connection errors.
+        """
+        if self._recv_done:
+            return None
+        var msg = self._channel[].recv_msg[Resp](self.sid)
+        if not msg:
+            self._recv_done = True
+        return msg^
+
+    def finish(mut self) raises -> CallResult:
+        """Waits for trailers and returns the call status.
+
+        Returns:
+            The call result; `response` is empty because messages were
+            consumed through `recv`.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        return self._channel[].finish(self.sid)
+
+    def cancel(mut self) raises:
+        """Cancels the call with RST_STREAM(CANCEL)."""
+        self._recv_done = True
+        self._channel[].cancel(self.sid)
+
+
+struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
+    """Typed handle for one client-streaming RPC.
+
+    Holds an untracked pointer to the `GrpcChannel` that started the call.
+    Do not store it after the channel is closed or moved.
+    """
+
+    var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
+    """Untracked pointer to the owning channel; valid only while it lives."""
+    var sid: UInt32
+    """The HTTP/2 stream id of this call."""
+    var _send_closed: Bool
+    """True after `close_send` or `finish` half-closed the request stream."""
+
+    @staticmethod
+    def start(
+        mut channel: GrpcChannel, path: StringSpan, *, timeout_ns: Int64 = 0
+    ) raises -> Self:
+        """Opens the call without sending a request message.
+
+        Args:
+            channel: The channel that owns the connection.
+            path: Full method path, e.g. `/echo.Echo/Join`.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            A handle for `send` / `finish`.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        var sid = channel.start_call(path, Metadata(), timeout_ns=timeout_ns)
+        return Self(
+            _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
+            sid=sid,
+            _send_closed=False,
+        )
+
+    def send(mut self, msg: Req) raises:
+        """Sends one request message.
+
+        Args:
+            msg: The message to encode and send.
+
+        Raises:
+            If the request stream is already half-closed, the encoded
+            message exceeds `max_message_size`, or on connection errors.
+        """
+        if self._send_closed:
+            raise Error("grpc: send after close_send")
+        self._channel[].send_msg[Req](self.sid, msg, last=False)
+
+    def close_send(mut self) raises:
+        """Half-closes the request stream without sending a message."""
+        if self._send_closed:
+            return
+        self._channel[].close_send(self.sid)
+        self._send_closed = True
+
+    def finish(mut self) raises -> Resp:
+        """Half-closes if needed, receives the response, and checks status.
+
+        Returns:
+            The decoded response message.
+
+        Raises:
+            The call's `Status` when it is not OK, or if the server sent
+            no response message.
+        """
+        self.close_send()
+        var msg = self._channel[].recv_msg[Resp](self.sid)
+        var result = self._channel[].finish(self.sid)
+        if not result.status.is_ok():
+            raise result.status.to_error()
+        if not msg:
+            raise Error("grpc: missing response message")
+        return msg.take()
+
+    def cancel(mut self) raises:
+        """Cancels the call with RST_STREAM(CANCEL)."""
+        self._send_closed = True
+        self._channel[].cancel(self.sid)
+
+
+struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
+    """Typed handle for one bidirectional streaming RPC.
+
+    Recv-driven ping-pong works on one thread: `recv` pumps the connection
+    until the next message. Full-duplex firehose needs threads, which Mojo
+    1.0 does not expose. Holds an untracked pointer to the `GrpcChannel`
+    that started the call; do not store it after the channel is closed or
+    moved.
+    """
+
+    var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
+    """Untracked pointer to the owning channel; valid only while it lives."""
+    var sid: UInt32
+    """The HTTP/2 stream id of this call."""
+    var _send_closed: Bool
+    """True after `close_send` half-closed the request stream."""
+    var _recv_done: Bool
+    """True after the response stream has ended."""
+
+    @staticmethod
+    def start(
+        mut channel: GrpcChannel, path: StringSpan, *, timeout_ns: Int64 = 0
+    ) raises -> Self:
+        """Opens the call without sending a message.
+
+        Args:
+            channel: The channel that owns the connection.
+            path: Full method path, e.g. `/echo.Echo/Chat`.
+            timeout_ns: Call deadline in nanoseconds; 0 means none.
+
+        Returns:
+            A handle for `send` / `recv` / `finish`.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        var sid = channel.start_call(path, Metadata(), timeout_ns=timeout_ns)
+        return Self(
+            _channel=Pointer(to=channel).unsafe_origin_cast[MutUntrackedOrigin](),
+            sid=sid,
+            _send_closed=False,
+            _recv_done=False,
+        )
+
+    def send(mut self, msg: Req, *, last: Bool = False) raises:
+        """Sends one request message.
+
+        Args:
+            msg: The message to encode and send.
+            last: If True, half-closes the request stream after this
+                message.
+
+        Raises:
+            If the request stream is already half-closed, the encoded
+            message exceeds `max_message_size`, or on connection errors.
+        """
+        if self._send_closed:
+            raise Error("grpc: send after close_send")
+        self._channel[].send_msg[Req](self.sid, msg, last=last)
+        if last:
+            self._send_closed = True
+
+    def recv(mut self) raises -> Optional[Resp]:
+        """Receives the next response message; None when the stream ends.
+
+        Returns:
+            The decoded message, or None on end of the response stream.
+
+        Raises:
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            decoding, framing, or connection errors.
+        """
+        if self._recv_done:
+            return None
+        var msg = self._channel[].recv_msg[Resp](self.sid)
+        if not msg:
+            self._recv_done = True
+        return msg^
+
+    def close_send(mut self) raises:
+        """Half-closes the request stream without sending a message."""
+        if self._send_closed:
+            return
+        self._channel[].close_send(self.sid)
+        self._send_closed = True
+
+    def finish(mut self) raises -> CallResult:
+        """Waits for trailers and returns the call status.
+
+        Returns:
+            The call result; `response` is empty because messages were
+            consumed through `recv`.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
+        return self._channel[].finish(self.sid)
+
+    def cancel(mut self) raises:
+        """Cancels the call with RST_STREAM(CANCEL)."""
+        self._send_closed = True
+        self._recv_done = True
+        self._channel[].cancel(self.sid)

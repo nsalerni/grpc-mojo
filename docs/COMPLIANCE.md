@@ -428,5 +428,7 @@ The repo's unit tests are themselves reference-anchored: protobuf goldens genera
 
 ## Known gaps (tracked, not silent)
 
-- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.
+- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Published `mojo-zlib` depends on nightly Mojo, not 1.0. Compressed messages are rejected, not mis-decoded.
 - **Concurrency**: `PollingServer` overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). Streaming RPCs remain on the blocking server.
+
+See [ROADMAP.md](ROADMAP.md#remaining-work) for why graceful GOAWAY drain, blocking-server keepalive, and a configurable initial window are not in this tree yet.
