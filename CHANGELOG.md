@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added typed streaming client call objects: `ServerStreamingCall`,
+  `ClientStreamingCall`, and `BidiStreamingCall`. Generated service stubs
+  return those handles (`EchoClient.split` / `join` / `chat`). The older
+  `join_start` / `chat_start` names are gone; the lower-level
+  `start_call` / `send_msg` / `recv_msg` / `finish` path remains.
+  Typed call objects copy the channel deadline at start and restore it
+  before `recv` / `finish`, so overlapping timed calls keep independent
+  budgets. A zero restored deadline clears `SO_RCVTIMEO` so an untimed
+  receive does not inherit an earlier call's socket timeout. `finish`
+  arms the remaining timeout while waiting for trailers.
+  `GrpcChannel.finish` and `cancel` clear a call deadline so the
+  next call on the same channel is not bound by a leftover `SO_RCVTIMEO`.
 - `PollingServer` poll timeouts use remaining time until the next keepalive
   PING instead of the full interval, stay gated on the HTTP/2 preface, and
   do not delay an expired idle or RPC deadline with a later PING timer.

@@ -68,6 +68,10 @@ bindings to zlib. Mojo's stdlib still has no zlib/deflate API.
 flag and `grpc-accept-encoding` negotiation, then verify it against grpcio. Use
 that integration experience to inform a `std.compress` proposal upstream.
 
+**Blocked**: published `mojo-zlib` 0.1.7 depends on nightly Mojo, not
+`mojo >=1.0.0,<2`. grpc-mojo stays on stable 1.0, so gzip waits on a
+1.0-compatible codec. Compressed messages are rejected, not mis-decoded.
+
 ## 5. Big-endian byte order helpers — **small stdlib PR**
 
 **Gap**: `std.bit` has `byte_swap` but no `to_be_bytes`/`from_be_bytes`-style
@@ -115,7 +119,7 @@ stdlib forum alongside the async RFC.
 | 5 | BE/LE int↔bytes | modular/modular PR | S | now |
 | 6 | base64 variants | modular/modular PR | S | now |
 | 1 | `std.net` sockets | RFC thread + community package → stdlib PR | M | after v0 ships |
-| 4 | gzip integration | existing `mojo-zlib` package, then `std.compress` proposal | M | next |
+| 4 | gzip integration | 1.0-compatible zlib package, then `std.compress` proposal | M | blocked: mojo-zlib is nightly-only |
 | 2 | reactor | community package (`mojo-reactor`) | L | after Modular async stabilizes |
 | 7 | threads | forum RFC + `mojo-threads` package | M | next: unblocks concurrent server |
 | 3 | TLS | community package (`mojo-tls`) | complete | shipped |

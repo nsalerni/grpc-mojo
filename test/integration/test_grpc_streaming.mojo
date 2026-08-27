@@ -3,15 +3,19 @@
 # kernel; the server handler then runs to completion; client reads after).
 
 from std.testing import assert_equal, assert_true
+from std.time import sleep
 
 from h2 import Http2Connection
 from grpc import (
+    BidiStreamingCall,
+    ClientStreamingCall,
     GrpcChannel,
     GrpcTransport,
     Metadata,
     Server,
     ServerCall,
     ServerContext,
+    ServerStreamingCall,
     StatusCode,
 )
 from net import TCPStream, TCPListener
@@ -165,6 +169,130 @@ def test_bidi_sequenced() raises:
     rig.server_conn.close()
 
 
+def test_typed_server_streaming_call() raises:
+    var rig = make_rig()
+    var call = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="alpha beta gamma"),
+    )
+    rig.pump_server_until_reply()
+
+    var words = List[String]()
+    while True:
+        var msg = call.recv()
+        if not msg:
+            break
+        words.append(msg.value().message.copy())
+    assert_equal(len(words), 3)
+    assert_equal(words[0], "alpha")
+    assert_equal(words[1], "beta")
+    assert_equal(words[2], "gamma")
+    var result = call.finish()
+    assert_true(result.status.is_ok(), "typed server-streaming OK")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_typed_client_streaming_call() raises:
+    var rig = make_rig()
+    var call = ClientStreamingCall[EchoRequest, EchoResponse].start(
+        rig.channel, "/echo.Echo/Join"
+    )
+    for word in ["a", "bb", "ccc"]:
+        call.send(EchoRequest(message=String(word)))
+    call.close_send()
+    rig.pump_server_until_reply()
+    var resp = call.finish()
+    assert_equal(resp.message, "a+bb+ccc")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_typed_bidi_call() raises:
+    var rig = make_rig()
+    var call = BidiStreamingCall[EchoRequest, EchoResponse].start(
+        rig.channel, "/echo.Echo/Chat"
+    )
+    for word in ["x", "y"]:
+        call.send(EchoRequest(message=String(word)))
+    call.close_send()
+    rig.pump_server_until_reply()
+    var got = List[String]()
+    while True:
+        var msg = call.recv()
+        if not msg:
+            break
+        got.append(msg.value().message.copy())
+    assert_equal(len(got), 2)
+    assert_equal(got[0], "pong: x")
+    assert_equal(got[1], "pong: y")
+    var result = call.finish()
+    assert_true(result.status.is_ok(), "typed bidi OK")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_typed_call_keeps_own_deadline() raises:
+    var rig = make_rig()
+    var first = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="a"),
+        timeout_ns=5_000_000_000,
+    )
+    var first_deadline = first._deadline_ns
+    assert_true(first_deadline != 0, "first call stored a deadline")
+    assert_equal(rig.channel.deadline_ns, first_deadline)
+    var second = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="b"),
+        timeout_ns=1_000_000_000,
+    )
+    assert_true(second._deadline_ns != 0, "second call stored a deadline")
+    assert_true(
+        first._deadline_ns != second._deadline_ns,
+        "overlapping timed calls keep independent deadlines",
+    )
+    assert_equal(rig.channel.deadline_ns, second._deadline_ns)
+    assert_equal(first._deadline_ns, first_deadline)
+    first.cancel()
+    second.cancel()
+    rig.channel.close()
+    rig.server_conn.close()
+
+
+def test_untimed_recv_does_not_inherit_socket_timeout() raises:
+    var rig = make_rig()
+    var timed = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="a"),
+        timeout_ns=50_000_000,
+    )
+    rig.pump_server_until_reply()
+    var timed_msg = timed.recv()
+    assert_true(Bool(timed_msg), "timed recv delivered")
+    var untimed = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="b"),
+    )
+    rig.pump_server_until_reply()
+    sleep(0.12)
+    var untimed_msg = untimed.recv()
+    assert_true(
+        Bool(untimed_msg),
+        "untimed recv must not inherit the expired 50ms socket timeout",
+    )
+    assert_equal(untimed_msg.value().message, "b")
+    timed.cancel()
+    untimed.cancel()
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_streaming_handler_error() raises:
     var rig = make_rig()
     var sid = rig.channel.start_call("/echo.Echo/FailStream", Metadata())
@@ -191,5 +319,10 @@ def main() raises:
     test_server_streaming()
     test_client_streaming()
     test_bidi_sequenced()
+    test_typed_server_streaming_call()
+    test_typed_client_streaming_call()
+    test_typed_bidi_call()
+    test_typed_call_keeps_own_deadline()
+    test_untimed_recv_does_not_inherit_socket_timeout()
     test_streaming_handler_error()
     print("test_grpc_streaming: all tests passed")

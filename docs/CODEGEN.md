@@ -1,17 +1,22 @@
 # protoc-gen-mojo — Code Generation Reference
 
-`tools/protoc-gen-mojo` is a standard `protoc` plugin that turns `.proto`
-files into Mojo message structs and gRPC stubs. It is validated by the same
-gates as the runtime: the generated code passes Google's protobuf conformance
-suite (1476/1476 proto3 binary and JSON tests) and drives the official gRPC
-interop cases against `grpcio`.
+The plugin lives in [protomojo](https://github.com/nsalerni/protomojo)
+(`tools/protoc-gen-mojo`). It turns `.proto` files into Mojo message structs
+and gRPC stubs for this runtime. It is validated by the same gates: the
+generated code passes Google's protobuf conformance suite (1476/1476 proto3
+binary and JSON tests) and drives the official gRPC interop cases against
+`grpcio`.
 
 ## Invocation
 
+`pixi run gen-proto` runs this in the project environment, which includes
+`grpcio-tools`. Outside Pixi, install `grpcio-tools` in the active
+`python3` environment before invoking the plugin:
+
 ```sh
-pixi run python3 -m grpc_tools.protoc \
+python3 -m grpc_tools.protoc \
   -I path/to/protos \
-  --plugin=protoc-gen-mojo=tools/protoc-gen-mojo \
+  --plugin=protoc-gen-mojo=path/to/protomojo/tools/protoc-gen-mojo \
   --mojo_out=OUT_DIR \
   your.proto
 ```
@@ -34,7 +39,7 @@ output directory on the include path (`-I OUT_DIR`).
 | `bool` | `Bool` | |
 | `string` | `String` | UTF-8 validated on decode |
 | `bytes` | `List[Byte]` | |
-| `enum E` | `Int32` + a struct of `comptime` constants | open-enum semantics |
+| `enum E` | wrapper struct `E` with `var value: Int32`, `comptime` constants, `name()`, and `from_name()` | proto3 open-enum: unknown numbers round-trip. Published protomojo 0.3.0 still emits `Int32` plus constants; regenerate after the wrapper release. |
 | message `M` (singular) | `Optional[M]` | presence tracked |
 | `optional` scalar (proto3) | `Optional[T]` | explicit presence: set values encode even at default |
 | `repeated` scalar | `List[T]` | packed by default; `[packed = false]` honored; decoder accepts both |
@@ -66,8 +71,14 @@ For each service the plugin emits:
 
 - `comptime <SERVICE>_<METHOD>_PATH` constants,
 - a `<Service>Client` struct wrapping `GrpcChannel` — unary methods make the
-  full call; streaming methods return the stream id and document the
-  `send_msg` / `recv_msg` / `close_send` / `finish` flow,
+  full call; streaming methods return typed call objects:
+
+| Call type | Methods |
+|---|---|
+| `ServerStreamingCall[Resp]` | `recv`, `finish`, `cancel` |
+| `ClientStreamingCall[Req, Resp]` | `send`, `close_send`, `finish`, `cancel` |
+| `BidiStreamingCall[Req, Resp]` | `send`, `recv`, `close_send`, `finish`, `cancel` |
+
 - an `add_<service>_service[...](mut server)` helper that registers one
   compile-time handler per method with the right kind
   (`register_unary` / `register_server_streaming` /
