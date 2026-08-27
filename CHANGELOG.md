@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `GrpcChannel.connect_tls`, `Server.tls`, and `PollingServer.tls` take
+  `StringSpan` for SNI and filesystem paths, matching `connect` / `unix`.
+  Values are copied to `String` at the TLS FFI boundary.
+
 - Added typed streaming client call objects: `ServerStreamingCall`,
   `ClientStreamingCall`, and `BidiStreamingCall`. Generated service stubs
   return those handles (`EchoClient.split` / `join` / `chat`). The older

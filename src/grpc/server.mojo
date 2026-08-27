@@ -469,10 +469,10 @@ struct Server(Movable):
     def tls(
         host: StringSpan,
         port: UInt16,
-        cert_chain_pem: String,
-        key_pem: String,
+        cert_chain_pem: StringSpan,
+        key_pem: StringSpan,
         *,
-        client_ca_file: String = "",
+        client_ca_file: StringSpan = "",
         require_client_cert: Bool = False,
     ) raises -> Server:
         """Constructs a TLS server that accepts only `h2` with ALPN.
@@ -495,10 +495,10 @@ struct Server(Movable):
         """
         var out = Server(host, port)
         out._tls_context = TLSContext.server(
-            cert_chain_pem,
-            key_pem,
+            String(cert_chain_pem),
+            String(key_pem),
             alpn=[String("h2")],
-            client_ca_file=client_ca_file,
+            client_ca_file=String(client_ca_file),
             require_client_cert=require_client_cert,
         )
         return out^

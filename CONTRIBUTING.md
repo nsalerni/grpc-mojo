@@ -44,9 +44,9 @@ Dependency edges point strictly down so every package stays extractable
 | `packages/mojo-http2/src/h2` | `hpack`, `net` |
 | `src/grpc` | everything above |
 
-Each `packages/<repo>` folder is a self-contained image of a future
-standalone repository — keep new files inside the right package, with its
-tests in that package's `test/` directory.
+Each `packages/<repo>` folder is populated by `python3 tools/fetch_deps.py`
+on a standalone checkout (sibling clones work too). Keep new files inside
+the owning package, with tests in that package's `test/` directory.
 
 Please don't add upward or sideways imports — extraction as standalone
 packages ([docs/PRIMITIVES.md](docs/PRIMITIVES.md)) depends on it.
@@ -79,6 +79,9 @@ for what the codegen emits; keep the two structurally in sync.
 - This repo targets Mojo 1.0: `def` only (no `fn`), `comptime` not `alias`,
   `std.`-prefixed imports, explicit `.copy()`/`^` moves, and tests are plain
   executables run by `tools/run_tests.py` (`mojo test` no longer exists).
+  Hosts, method paths, and other borrowed text take `StringSpan`. Filesystem
+  paths are borrowed at the gRPC boundary and copied to `String` at the TLS
+  FFI boundary.
 
 ## Submitting changes
 
