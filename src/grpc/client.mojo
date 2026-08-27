@@ -854,7 +854,11 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         self._channel[].send_msg[Self.Req](self.sid, msg, last=False)
 
     def close_send(mut self) raises:
-        """Half-closes the request stream without sending a message."""
+        """Half-closes the request stream without sending a message.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
         if self._send_closed:
             return
         self._channel[].close_send(self.sid)
