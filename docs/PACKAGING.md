@@ -1,104 +1,53 @@
-# Packaging & Repo Topology
+# Packaging
 
-How the five packages become independently consumable, and how dependencies
-work between them once they do. This refines Track C of
-[ROADMAP.md](ROADMAP.md).
+How the five packages relate, and how to consume them.
 
-## Guiding fact: packages, not repos, are the unit of distribution
+## Repositories
 
-Mojo packages ship as conda packages on channels (the community standard is
-the [modular-community channel](https://docs.modular.com/max/packages/) on
-prefix.dev), built by the official
-[`pixi-build-mojo`](https://pixi.prefix.dev/latest/build/backends/pixi-build-mojo/)
-backend. One repo can publish several packages, so repo topology is a
-maintenance decision while package granularity is an API decision. We keep
-five packages regardless of how many repos host them.
+Each package is its own GitHub repository. grpc-mojo is the gRPC integration
+repo, not a monorepo.
 
-## Decision: three new repos, five packages
-
-| Repo | Publishes | Rationale |
+| Repo | Publishes | Depends on |
 |---|---|---|
-| `mojo-net` | `mojo-net` | Zero deps; broadest audience; the working prototype behind the `std.net` RFC (PRIMITIVES.md #1) — a standalone repo strengthens the proposal |
-| `protomojo` | `protomojo` + `protoc-gen-mojo` | Zero deps; flagship; audience (serialization) and release cadence independent of gRPC |
-| `mojo-http2` | `mojo-hpack` **and** `mojo-h2` (two packages, one repo) | hpack's only realistic consumers are HTTP/2 stacks and the two version in lockstep; Python's hyper project split hpack/hyperframe/h2 into separate repos and the maintenance tax is well documented. Two packages from one repo still lets someone depend on `mojo-hpack` alone |
-| `grpc-mojo` (this repo) | `grpc-mojo` | Product repo and integration umbrella: the gRPC compliance sections and official gRPC interop stay here; each package repo carries its own differential compliance suite (`packages/<pkg>/compliance/`, including h2spec and protobuf-conformance), which the umbrella runs and aggregates to test the repos together |
+| [mojo-net](https://github.com/nsalerni/mojo-net) | `mojo-net` | standard library |
+| [protomojo](https://github.com/nsalerni/protomojo) | `protomojo` | standard library |
+| [mojo-tls](https://github.com/nsalerni/mojo-tls) | `mojo-tls` | `mojo-net`, libssl |
+| [mojo-http2](https://github.com/nsalerni/mojo-http2) | `mojo-http2` (`hpack` + `h2`) | `mojo-net`, `mojo-tls` |
+| [grpc-mojo](https://github.com/nsalerni/grpc-mojo) | `grpc-mojo` | all of the above |
 
-Five separate repos was considered and rejected: it quintuples CI/release
-surface and fragments the differential-compliance harness for no consumer
-benefit that package granularity doesn't already provide.
+hpack and h2 version together in one repo so HTTP/2 consumers do not have to
+solve two independent release cadences.
 
-**Status**: the in-repo split is done — `packages/mojo-net`,
-`packages/protomojo`, and `packages/mojo-http2` are self-contained
-subfolders (own manifest, tests, README, LICENSE) that mirror the future
-repos exactly; `git subtree split` of a `packages/<repo>` directory at
-first publish preserves history. `tools/check_extraction.py` proves each
-file set is self-sufficient on every compliance run.
+## Development checkouts
 
-## Dependency mechanics
+Until you depend on published conda packages, grpc-mojo clones pinned sibling
+tags into gitignored `packages/`:
 
-### Released: conda version ranges (default)
-
-Each package declares a `[package]` section and conda-style dependencies:
-
-```toml
-# mojo-http2/pixi.toml — the mojo-h2 package
-[package]
-name = "mojo-h2"
-version = "0.1.0"
-
-[package.build]
-backend = { name = "pixi-build-mojo", version = "0.*" }
-
-[package.run-dependencies]
-mojo-hpack = ">=0.1.0,<0.2"
-mojo-net = ">=0.1.0,<0.2"
+```sh
+python3 tools/fetch_deps.py
 ```
 
-Publishing is a PR adding `recipe.yaml` to the modular-community repo,
-which builds and hosts the package. Consumers add the channel and a version
-range; the conda solver resolves the graph and `pixi.lock` pins exact
-versions. Conda allows only one version of a package per environment —
-keep compatibility ranges honest and wide, and follow semver from `0.x`.
+Pins live in [`deps.json`](../deps.json). Include paths in `pixi.toml` and CI
+point at those checkouts. Do not commit `packages/`.
 
-### Unreleased / development: pixi source dependencies
+Dependents that need source checkouts (`mojo-http2`, `mojo-tls`) use `.deps/`
+the same way. Leaf packages (`mojo-net`, `protomojo`) have no `deps.json`.
 
-Pixi's `pixi-build` preview (`preview = ["pixi-build"]` in the workspace
-manifest) supports `path` and `git` source entries, letting grpc-mojo's CI
-build against the other repos' `main` before a release:
+## Conda recipes
 
-```toml
-[workspace]
-preview = ["pixi-build"]
+Each repo has a [`recipe/recipe.yaml`](../recipe/recipe.yaml) that precompiles
+a `.mojoc` module. Version ranges for siblings are declared there. Publishing
+to a conda channel (for example modular-community on prefix.dev) is a separate
+step from tagging GitHub releases.
 
-[dependencies]
-mojo-hpack = { path = "../mojo-http2" }   # or a git source entry
-```
+Follow semver from `0.x`. Conda allows one version of a package per
+environment, so keep compatibility ranges honest.
 
-Use this for development and pre-release integration testing only; released
-consumers should always see channel packages.
+## Cross-repo bumps
 
-### Fallback: submodule + include path
+1. Tag and release the lower package.
+2. Update `deps.json` / `recipe.yaml` in dependents.
+3. Run `pixi run test` and `pixi run compliance` (and
+   `pixi run interop-official` in grpc-mojo).
 
-`git submodule` plus `-I <dep>/src` works with zero infrastructure but has
-no version solving. Acceptable for experiments; never for published
-packages.
-
-## Cross-repo version discipline
-
-- Semver tags per repo; changelogs per package.
-- grpc-mojo CI runs a compatibility matrix: released-channel versions of
-  each dependency **and** their git `main`, gated by the compliance suite,
-  so cross-repo breakage is caught before anyone tags a release.
-- The umbrella harness (official interop + gRPC sections) together with
-  the per-package differential suites it aggregates (h2spec, protobuf
-  conformance, hpack/h2/net differentials) remain the release gate for
-  every package: a dependency bump that fails them does not ship.
-
-## Pre-split checklist (per package)
-
-- [ ] API reviewed for the 0.1 surface; anything unstable made private.
-- [ ] Extracted test subset green standalone.
-- [ ] Package README (already at `packages/<repo>/README.md`) reviewed.
-- [ ] `pixi-build-mojo` package build verified locally (`pixi build`).
-- [ ] Known scope notes carried over (e.g. hpack's UTF-8-values note).
-- [ ] modular-community recipe PR opened.
+A dependency bump that fails those suites does not ship.

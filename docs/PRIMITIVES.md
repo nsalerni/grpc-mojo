@@ -1,16 +1,11 @@
 # Missing Mojo Primitives — Upstreaming Plan
 
-> Sequencing and phase gates for executing this plan live in
-> [ROADMAP.md](ROADMAP.md) (Tracks C and D).
+Building gRPC exposed gaps in Mojo 1.0's standard library. This document
+tracks each gap, what shipped in a sibling package, and the path back into
+[modular/modular](https://github.com/modular/modular) or a community package.
+See [ROADMAP.md](ROADMAP.md) for remaining product work.
 
-Building gRPC exposed real gaps in Mojo 1.0's standard library. This document
-tracks each gap, what we built instead, and the concrete path to contributing
-it back — either to [modular/modular](https://github.com/modular/modular)'s
-stdlib or as standalone community packages. Everything in this repo is layered
-(see [ARCHITECTURE.md](ARCHITECTURE.md)) so extraction is a directory move,
-not a rewrite.
-
-## 1. Sockets / networking (`src/net`) — **stdlib candidate**
+## 1. Sockets / networking ([mojo-net](https://github.com/nsalerni/mojo-net)) — **stdlib candidate**
 
 **Gap**: Mojo 1.0 has `std.io.FileDescriptor` but no `socket()`, no address
 types, no TCP/UDP API. Community projects (e.g. lightbug_http) each carry
@@ -29,9 +24,8 @@ read/write timeouts with a typed timeout error. **Publish-ready.**
 2. Propose the minimal core: `SocketAddress` (v4/v6), `TCPListener`,
    `TCPStream`, error mapping from `errno`. Keep `setsockopt` surface small
    (`SO_REUSEADDR`, `TCP_NODELAY`).
-3. Until accepted, publish as a standalone package `mojo-net` on the
-   modular-community conda channel (prefix.dev) so other projects stop
-   re-binding libc.
+3. Until accepted, keep [mojo-net](https://github.com/nsalerni/mojo-net) as the
+   community package so other projects stop re-binding libc.
 
 ## 2. Async I/O reactor — **standalone package first**
 

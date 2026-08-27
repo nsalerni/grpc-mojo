@@ -1,11 +1,9 @@
 # Testing strategy
 
-This project's correctness claim rests on **differential testing against
-reference implementations**, not on our own tests agreeing with our own
-code. This document maps out every verification layer, what it covers, and
-how to run it.
+Correctness is checked against reference implementations, not against this
+repo agreeing with itself.
 
-## The layers
+## Layers
 
 | Layer | What it proves | Command |
 |---|---|---|
@@ -15,63 +13,40 @@ how to run it.
 | Interop smoke | grpcio client ↔ mojo server and mojo client ↔ grpcio server round trips | `pixi run interop` |
 | Benchmarks | Throughput/latency baselines; CI smoke-runs `std.benchmark` and the grpc-mojo / grpcio / tonic comparison | `pixi run bench` / `pixi run bench-compare-smoke` |
 
-Every package repo (`mojo-net`, `protomojo`, `mojo-http2`, `mojo-tls`) carries its own
-unit tests, its own slice of the compliance suite, and its own benchmarks,
-so each remains independently verifiable after extraction. The umbrella
-repo aggregates the package suites and adds the gRPC-level checks.
+Each sibling repo runs its own unit tests and compliance slice. grpc-mojo
+aggregates those results and adds gRPC-level checks.
 
-## Unit-test coverage philosophy
+## Coverage
 
-Mojo 1.0 has no line/branch coverage tooling yet, so coverage is tracked
-**by feature matrix, not by line percentage**:
+Mojo 1.0 has no line-coverage tooling, so coverage is a feature matrix:
 
-1. Every public symbol (struct, method, function) must be exercised by at
-   least one test in its own package — including its documented error
-   paths. The current matrix was built by auditing each public API against
-   the test suites; the `test_*_edges.mojo` files exist specifically to
-   close the gaps that audit found (error paths, boundary values,
-   lifecycle, platform behaviors like SIGPIPE suppression and typed
-   timeouts).
-2. Anything protocol-visible must additionally be pinned by a reference:
-   golden bytes from Python `protobuf`, RFC 7541 Appendix C vectors,
-   hyperframe byte-differentials, h2spec, or a live grpcio peer. Never
-   assert our encoder against our own decoder alone.
-3. Bugs found by any layer get a regression test at the *lowest* layer
-   that can express them (e.g. the sint32 cast-fold bug is pinned by both
-   a unit test and the protobuf differential).
+1. Every public symbol has at least one test, including documented error paths.
+2. Protocol-visible behavior is also pinned by a reference (golden bytes, RFC
+   vectors, h2spec, or a live `grpcio` peer).
+3. Bugs get a regression test at the lowest layer that can express them.
 
-When adding a public API, add: a happy-path unit test, one test per
-documented `Raises:` condition, and — if the behavior is visible on the
-wire — a differential check in the package's compliance runner.
+When adding a public API: happy path, one test per documented `Raises:`, and a
+differential check if the behavior is visible on the wire.
 
-## Test layout
+## Layout
 
-```
-packages/<pkg>/test/          unit tests (test_*.mojo, executables)
-packages/<pkg>/compliance/    differential suite vs references (+ tools/)
-packages/<pkg>/bench/         benchmarks (--smoke for CI)
-test/integration/             umbrella gRPC end-to-end tests
-test/compliance/              umbrella suite: gRPC vs grpcio + aggregation
-test/interop/                 grpcio interop (quick + 12 official cases)
+```text
+src/grpc/                     gRPC implementation
+test/integration/             gRPC end-to-end tests
+test/compliance/              gRPC vs grpcio + aggregated sibling suites
+test/interop/                 grpcio interop (quick + official cases)
+packages/<repo>/              gitignored sibling checkouts from fetch_deps.py
 ```
 
-`tools/run_tests.py` runs every `test_*.mojo` with per-suite include paths
-so package tests cannot accidentally reach outside their declared
-dependencies; `tools/check_extraction.py` proves each package still
-compiles and runs from a bare staging directory with only its declared
-dependencies present.
+`tools/run_tests.py` uses per-suite include paths so tests cannot reach
+outside declared dependencies. `tools/check_extraction.py` compiles each
+package from a staging directory that contains only those dependencies.
 
 ## Benchmarks
 
-Benchmarks use `std.benchmark` and print `ns/op` plus derived throughput.
-They are indicative, not gating — CI runs them with `--smoke` (a few
-milliseconds per benchmark) purely to keep them compiling and running.
-Full runs use ~0.5 s per measurement:
-
 ```sh
-pixi run bench          # umbrella: proto, hpack/h2, net, end-to-end gRPC
+pixi run bench
 ```
 
-The end-to-end gRPC benchmark forks the server into a child process
-(Mojo 1.0 has no threads), so its numbers include both sides of the stack
-plus loopback TCP.
+CI runs `--smoke` so the benches keep compiling. Full runs are indicative,
+not gating.

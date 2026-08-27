@@ -6,10 +6,9 @@
 **Result: 304/304 checks passed.** Generated 2026-08-25 23:27 UTC.
 
 Every check compares grpc-mojo against an established reference
-implementation, never against itself. The proto, hpack, h2, and net
-sections are executed by each package's own compliance suite
-(`packages/<pkg>/compliance/run_compliance.py`) and aggregated here;
-the umbrella adds the gRPC, packaging, and unit-suite sections.
+implementation, never against itself. Sibling packages run their own
+compliance suites; this repo aggregates those results and adds the
+gRPC, packaging, and unit-suite sections.
 
 ## Environment
 

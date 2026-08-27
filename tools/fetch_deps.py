@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 """Fetch source dependencies for a standalone checkout.
 
-The grpc-mojo family is developed as sibling repositories (mojo-net,
-protomojo, mojo-http2, grpc-mojo). Until the packages are published to a
-conda channel, dependents consume them as *source* dependencies: this
-script clones each dependency listed in deps.json into the directory the
-manifest names (the umbrella uses packages/<name>, matching the historical
-monorepo layout, so every include path keeps working; mojo-http2 uses
-.deps/<name>).
+The grpc-mojo family is five repositories. Until conda packages are the
+default, dependents clone pinned tags from deps.json into a gitignored
+directory (grpc-mojo uses packages/<name>; mojo-http2 and mojo-tls use
+.deps/<name>) so include paths keep working.
 
-Already-present directories are left untouched — a monorepo-style checkout
-or a developer's own clone always wins over a fresh fetch. Use --update to
-fast-forward previously fetched clones to their pinned ref.
+Already-present directories are left untouched, so a local clone wins over
+a fresh fetch. Use --update to check out previously fetched clones at
+their pinned ref.
 
 URL selection: $GIT_URL_TEMPLATE (default
-"https://github.com/nsalerni/{name}.git", which works anonymously for
-public repos). CI on private repos overrides with per-dependency SSH host
-aliases, e.g. GIT_URL_TEMPLATE="git@github.com-{name}:nsalerni/{name}.git"
-with matching ~/.ssh/config entries carrying read-only deploy keys.
+"https://github.com/nsalerni/{name}.git").
 """
 
 import json
@@ -48,12 +42,21 @@ def main() -> int:
             if not update:
                 print(f"  {name}: already present at {dest} (skipped)")
                 continue
-            subprocess.run(["git", "-C", str(dest), "fetch", "origin", ref], check=True)
-            subprocess.run(["git", "-C", str(dest), "checkout", ref], check=True)
             subprocess.run(
-                ["git", "-C", str(dest), "pull", "--ff-only", "origin", ref],
-                check=False,
+                ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref],
+                check=True,
             )
+            # Shallow clones store a newly fetched tag in FETCH_HEAD without
+            # always creating refs/tags/<ref>, so check out FETCH_HEAD.
+            checkout = subprocess.run(
+                ["git", "-C", str(dest), "checkout", "--detach", "FETCH_HEAD"],
+            )
+            if checkout.returncode != 0:
+                print(
+                    f"  {name}: failed to check out {ref}",
+                    file=sys.stderr,
+                )
+                return 1
             print(f"  {name}: updated to {ref}")
             continue
         url = dep.get("url") or template.format(name=name)

@@ -6,21 +6,15 @@ Please report suspected vulnerabilities privately via
 [GitHub security advisories](https://github.com/nsalerni/grpc-mojo/security/advisories/new)
 rather than public issues. You should receive a response within a week.
 
-## Scope notes
+## Scope
 
-grpc-mojo supports h2c, TLS, and Unix domain sockets. TLS clients verify the
-certificate chain and hostname by default. They can load a client certificate
-chain and private key from files for a server that requires mutual TLS. TLS
-servers use one configured certificate chain and require ALPN negotiation of
-the `h2` protocol. Both server implementations can require a client
-certificate that chains to a configured client CA before they accept HTTP/2
-requests. Handlers can read the owned client leaf snapshot from
-`ServerContext.peer_certificate`. Certificate presence alone is not an
-authorization decision. Check `PeerCertificate.verified`, then apply the
-service's identity policy to the DER certificate.
+grpc-mojo accepts untrusted HTTP/2 and protobuf input on h2c, TLS, and Unix
+sockets. TLS clients verify the certificate chain and hostname by default.
+The HTTP/2 layer applies flood and concurrency limits; the protobuf decoder
+enforces the reference nesting-depth limit.
 
-The HTTP/2 layer limits rapid resets, PING and SETTINGS floods, concurrent
-streams, header sizes, and buffered output. The protobuf decoder enforces the
-reference nesting-depth limit. Neither server selects certificates by SNI.
-The project has not had an external security review. See
-[docs/ROADMAP.md](docs/ROADMAP.md) for the remaining work.
+Certificate presence is not an authorization decision. Check
+`PeerCertificate.verified`, then apply the service's identity policy.
+
+The project has not had an external security review. Remaining work is in
+[docs/ROADMAP.md](docs/ROADMAP.md).

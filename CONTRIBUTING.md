@@ -1,100 +1,54 @@
 # Contributing to grpc-mojo
 
-Thanks for your interest! This project aims to be a correct, verifiable gRPC
-implementation for Mojo — and a source of reusable primitives for the Mojo
-ecosystem. Contributions of all sizes are welcome.
+Thanks for looking at the project. Protocol-visible behavior is checked
+against reference implementations (`grpcio`, h2spec, protobuf conformance),
+not against this repo agreeing with itself.
 
-## Getting set up
+## Setup
 
 ```sh
-# toolchain (pixi manages Mojo and the Python reference implementations)
 curl -fsSL https://pixi.sh/install.sh | sh
-git clone https://github.com/nsalerni/grpc-mojo && cd grpc-mojo
+git clone https://github.com/nsalerni/grpc-mojo.git
+cd grpc-mojo
 pixi install
-
-# make sure everything is green before you start
+python3 tools/fetch_deps.py
 pixi run test
 ```
 
-## The one rule that matters most
+Sibling packages ([mojo-net](https://github.com/nsalerni/mojo-net),
+[mojo-http2](https://github.com/nsalerni/mojo-http2),
+[mojo-tls](https://github.com/nsalerni/mojo-tls),
+[protomojo](https://github.com/nsalerni/protomojo)) are separate repos.
+`fetch_deps.py` clones the pinned tags into gitignored `packages/` so local
+include paths work. Changes to those packages belong in their own
+repositories.
 
-**Correctness comes from reference implementations, never from our own code
-agreeing with itself.** Protobuf behavior is pinned by golden bytes from
-Python `protobuf`, HPACK by the RFC 7541 vectors, HTTP/2 by hyper-h2 and
-h2spec, and gRPC semantics by `grpcio`. If you change protocol behavior, the
-change must be validated by:
-
-```sh
-pixi run test              # unit suites (seconds)
-pixi run compliance        # differential suite vs references (~2 min)
-pixi run interop-official  # the 12 canonical gRPC interop cases (~1 min)
-```
-
-CI runs all three on macOS and Linux. A PR that only passes tests it wrote
-for itself will be asked for reference-anchored coverage.
-
-## Project layout and boundaries
-
-Dependency edges point strictly down so every package stays extractable
-(see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
-
-| Package | May import |
-|---|---|
-| `packages/mojo-net`, `packages/protomojo`, `packages/mojo-http2/src/hpack` | standard library only |
-| `packages/mojo-http2/src/h2` | `hpack`, `net` |
-| `src/grpc` | everything above |
-
-Each `packages/<repo>` folder is populated by `python3 tools/fetch_deps.py`
-on a standalone checkout (sibling clones work too). Keep new files inside
-the owning package, with tests in that package's `test/` directory.
-
-Please don't add upward or sideways imports — extraction as standalone
-packages ([docs/PRIMITIVES.md](docs/PRIMITIVES.md)) depends on it.
-
-## Generated files
-
-`packages/mojo-http2/src/hpack/tables.mojo`,
-`packages/protomojo/test/proto_golden.mojo`, and every `*_pb.mojo` are
-generated. Never edit them by hand — change the generator (in the owning
-package's `tools/`) and run:
+## Checks
 
 ```sh
-pixi run gen-hpack     # HPACK tables from RFC 7541
-pixi run gen-vectors   # protobuf goldens via Python protobuf
-pixi run gen-proto     # *_pb.mojo via tools/protoc-gen-mojo
+pixi run format
+pixi run test
+pixi run compliance          # if you change protocol behavior
+pixi run interop-official    # if you change gRPC call semantics
 ```
 
-`packages/protomojo/test/proto_messages.mojo` is the hand-written reference
-for what the codegen emits; keep the two structurally in sync.
+Public APIs need docstrings in the
+[Mojo docstring style](https://github.com/modular/modular/blob/main/mojo/stdlib/docs/docstring-style-guide.md).
+This repo targets Mojo 1.0: `def` only, `comptime` not `alias`, `std.`-prefixed
+imports. Hosts, method paths, metadata keys, and other borrowed text take
+`StringSpan`. Filesystem paths are borrowed at the gRPC boundary and copied
+to `String` at the TLS FFI boundary.
 
-## Style
+Generated files (`*_pb.mojo` and similar) should be regenerated, not edited:
 
-- Run `pixi run format` (mojo format) before committing.
-- Public APIs need docstrings in the
-  [Mojo docstring style](https://github.com/modular/modular/blob/main/mojo/stdlib/docs/docstring-style-guide.md).
-  Check coverage per file with:
-  `pixi run mojo doc --diagnose-missing-doc-strings -o /dev/null <file>`
-- Comments state constraints the code can't express (spec section numbers,
-  platform quirks, ownership rules) — not what the next line does.
-- This repo targets Mojo 1.0: `def` only (no `fn`), `comptime` not `alias`,
-  `std.`-prefixed imports, explicit `.copy()`/`^` moves, and tests are plain
-  executables run by `tools/run_tests.py` (`mojo test` no longer exists).
-  Hosts, method paths, metadata keys, and other borrowed text take
-  `StringSpan`. Filesystem paths are borrowed at the gRPC boundary and
-  copied to `String` at the TLS FFI boundary.
+```sh
+pixi run gen-proto
+```
 
-## Submitting changes
+## Pull requests
 
-1. Fork and branch from `main`.
-2. Keep PRs focused; separate mechanical churn from behavior changes.
-3. Include tests — reference-anchored where behavior is protocol-visible.
-4. Make sure CI is green.
+Fork, branch from `main`, and keep the change focused. Open an issue first
+for large features; [docs/ROADMAP.md](docs/ROADMAP.md) lists planned work.
 
-For large changes (new protocol features, new packages), open an issue first
-so we can agree on the approach — [docs/ROADMAP.md](docs/ROADMAP.md) shows
-where the project is headed and what's already planned.
-
-## License
-
-By contributing, you agree that your contributions are licensed under the
+By contributing, you agree that your contributions are licensed under
 [Apache License 2.0](LICENSE).

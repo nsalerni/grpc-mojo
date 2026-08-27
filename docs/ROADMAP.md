@@ -41,6 +41,12 @@ is the live list.
 - **`std.net` RFC, `to_be_bytes`, unpadded base64, integer cast-fold.**
   These are Modular stdlib / compiler items (Track D), not local work.
 
+### Sibling packages
+
+- [mojo-tls](https://github.com/nsalerni/mojo-tls): TLS session resumption
+- [protomojo](https://github.com/nsalerni/protomojo): proto2, editions, and
+  text format remain out of scope unless a consumer needs them
+
 ### Process / access (not code)
 
 - Publishing conda packages to modular-community needs tokens and a
@@ -151,25 +157,21 @@ nanoseconds.
 
 ## Track C — Standalone community packages
 
-Extraction strategy: **the monorepo stays the source of truth** while APIs
-move fast; packages split out via `git subtree split` at first publish to
-the **modular-community channel (prefix.dev)**. Repo topology, dependency
-mechanics (conda ranges for releases, pixi-build source deps for
-development), and the pre-split checklist are decided in
-[PACKAGING.md](PACKAGING.md): three new repos (`mojo-net`, `protomojo`,
-`mojo-http2` publishing both `mojo-hpack` and `mojo-h2`), with grpc-mojo
-remaining the integration umbrella. Apache-2.0, semver from 0.x, each repo
-carrying its extracted test subset.
+**Done as GitHub repositories.** The four packages live in sibling repos;
+grpc-mojo is the integration umbrella. `packages/` is a gitignored
+`fetch_deps.py` checkout, not the source of truth. Repo topology and conda
+mechanics are in [PACKAGING.md](PACKAGING.md). Remaining Track C work is
+publishing conda packages to modular-community (tokens / a human step)
+and a mojo-threads RFC before any thread package.
 
-| Package | Source | Before publishing | Community value |
+| Package | Repository | Remaining | Community value |
 |---|---|---|---|
-| **protomojo** (+ `protoc-gen-mojo`) | `src/proto`, `tools/` | A3 depth limit, A4 imports | Protobuf for Mojo — useful far beyond gRPC. Flagship. |
-| **mojo-hpack** | `src/hpack` | none — RFC-complete today | Any HTTP/2 work needs it |
-| **mojo-net** | `src/net` | DNS (`getaddrinfo`), IPv6, UDP, timeouts (A2.1) | Ends per-project libc socket bindings (lightbug et al.) |
-| **mojo-h2** | `src/h2` | A3 guards, B3 clean | HTTP/2 for Mojo servers/clients generally |
-| **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | integrate its zlib bindings with grpc-mojo | Enables pending gRPC gzip support; general compression |
-| **mojo-threads** | new | RFC first (see D4) | pthread_create/mutex/condvar via `abi("C")` trampolines; unblocks concurrent serving |
-| **mojo-tls** | `packages/mojo-tls` | shipped with strict X.509, SNI, and ALPN in both roles | TLS for the whole ecosystem |
+| **protomojo** (+ `protoc-gen-mojo`) | [protomojo](https://github.com/nsalerni/protomojo) | proto2, editions, and text format out of scope | Protobuf for Mojo — useful far beyond gRPC. Flagship. |
+| **mojo-http2** (`hpack` + `h2`) | [mojo-http2](https://github.com/nsalerni/mojo-http2) | HTTP/2 flood guards | HPACK and HTTP/2 for Mojo servers/clients generally |
+| **mojo-net** | [mojo-net](https://github.com/nsalerni/mojo-net) | none for the current socket/DNS/poller scope | Ends per-project libc socket bindings |
+| **mojo-tls** | [mojo-tls](https://github.com/nsalerni/mojo-tls) | TLS session resumption | TLS 1.2/1.3 with strict X.509, SNI, and ALPN |
+| **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | 1.0-compatible retarget, then gRPC gzip | Enables pending `grpc-encoding: gzip` |
+| **mojo-threads** | not started | RFC first (see D4) | pthread_create/mutex/condvar via `abi("C")` trampolines; unblocks concurrent serving |
 
 mojo-threads is deliberately RFC-before-code: thread-safety guarantees
 interact with Mojo's ownership model (Send/Sync-like semantics), and a

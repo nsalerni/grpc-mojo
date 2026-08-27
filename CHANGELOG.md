@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Rewrote README, contributor, and packaging docs for the current
+  five-repository layout.
 - `Metadata.add` and `add_binary` take `StringSpan` for keys and ASCII
   values, matching host and method-path constructors. Entries are copied
   to owned `HeaderField` strings for storage.
