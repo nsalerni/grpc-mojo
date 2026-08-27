@@ -27,14 +27,6 @@ is the live list.
 - Broader structured fuzz of framing and HPACK beyond the existing
   compliance harness (Track B5).
 
-### Blocked on another package
-
-- **Configurable HTTP/2 initial window on `GrpcChannel` / `Server` /
-  `PollingServerConfig`.** `Http2Connection` now accepts
-  `initial_window_size` in mojo-http2. This repo pins a published http2
-  release, so the gRPC constructors cannot advertise a non-default window
-  until that package tags a release that includes the knob.
-
 ### Blocked on Mojo 1.0
 
 - **`PollingServer.stop()` / graceful GOAWAY drain loop.** mojo-http2
@@ -115,11 +107,11 @@ previous deadline.
 ### A5. Protocol niceties *(S–M)*
 Shipped: `grpc-status-details-bin` on client extract and server send; max
 message size on `Server`, `PollingServer`, and `GrpcChannel`;
-`PollingServer` keepalive PINGs.
+`PollingServer` keepalive PINGs; configurable HTTP/2 initial window on
+`GrpcChannel`, `Server`, and `PollingServerConfig`.
 
 Still open, and blocked as listed above: graceful GOAWAY drain on
-`PollingServer.stop()`, blocking-`Server` keepalive PING, and
-configurable initial window (http2 constructor first, then a grpc pin).
+`PollingServer.stop()`, and blocking-`Server` keepalive PING.
 
 ---
 

@@ -13,6 +13,7 @@
 #   unicode         unary echo of a unicode string; prints response
 
 from std.sys import argv
+from std.time import monotonic
 
 from common import to_hex
 from echo_pb import EchoRequest, EchoResponse
@@ -137,6 +138,7 @@ def main() raises:
 
     elif mode == "sleep":
         var ms = Int(args[3])
+        var t0 = Int64(monotonic())
         var r = unary_text(
             channel,
             "/probe.Probe/Sleep",
@@ -144,7 +146,16 @@ def main() raises:
             Metadata(),
             Int64(ms) * 1_000_000,
         )
-        print("code=", r[1], " message=", r[2], sep="")
+        var took_ms = Int((Int64(monotonic()) - t0) // 1_000_000)
+        print(
+            "code=",
+            r[1],
+            " message=",
+            r[2],
+            " took_ms=",
+            took_ms,
+            sep="",
+        )
 
     elif mode == "richstatus":
         var req = EchoRequest()

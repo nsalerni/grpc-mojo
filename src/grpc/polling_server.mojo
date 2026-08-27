@@ -36,7 +36,7 @@ from std.ffi import c_int
 from std.time import monotonic
 
 from hpack import HeaderField
-from h2 import H2_ALPN, Http2Connection, get_u32_be
+from h2 import DEFAULT_WINDOW_SIZE, H2_ALPN, Http2Connection, get_u32_be
 from net import PollEvent, Poller, TCPListener, is_would_block
 from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
@@ -67,6 +67,8 @@ struct PollingServerConfig(Copyable, Movable):
     """Maximum TLS handshake steps in one Poller turn."""
     var max_message_size: Int
     """Maximum serialized unary request or response size."""
+    var initial_window_size: UInt32
+    """Per-stream receive window advertised as SETTINGS_INITIAL_WINDOW_SIZE."""
     var max_read_bytes_per_event: Int
     """Maximum socket bytes read for one connection event."""
     var max_frames_per_event: Int
@@ -92,6 +94,7 @@ struct PollingServerConfig(Copyable, Movable):
         max_pending_handshakes: Int = 32,
         max_handshake_steps_per_event: Int = 32,
         max_message_size: Int = 4 * 1024 * 1024,
+        initial_window_size: UInt32 = DEFAULT_WINDOW_SIZE,
         max_read_bytes_per_event: Int = 64 * 1024,
         max_frames_per_event: Int = 64,
         max_write_bytes_per_event: Int = 64 * 1024,
@@ -111,6 +114,9 @@ struct PollingServerConfig(Copyable, Movable):
             max_handshake_steps_per_event: Maximum TLS handshake work for one
                 Poller turn.
             max_message_size: Maximum serialized request or response size.
+            initial_window_size: Per-stream receive window advertised as
+                SETTINGS_INITIAL_WINDOW_SIZE. Default 65,535. Must not
+                exceed 2^31-1.
             max_read_bytes_per_event: Maximum bytes read per connection event.
             max_frames_per_event: Maximum HTTP/2 frames dispatched per event.
             max_write_bytes_per_event: Maximum bytes written per event.
@@ -132,6 +138,7 @@ struct PollingServerConfig(Copyable, Movable):
         self.max_pending_handshakes = max_pending_handshakes
         self.max_handshake_steps_per_event = max_handshake_steps_per_event
         self.max_message_size = max_message_size
+        self.initial_window_size = initial_window_size
         self.max_read_bytes_per_event = max_read_bytes_per_event
         self.max_frames_per_event = max_frames_per_event
         self.max_write_bytes_per_event = max_write_bytes_per_event
@@ -159,6 +166,8 @@ struct PollingServerConfig(Copyable, Movable):
             raise Error("grpc: max_message_size must be non-negative")
         if self.max_message_size > 0xFFFFFFFF:
             raise Error("grpc: max_message_size exceeds the gRPC prefix")
+        if self.initial_window_size > 0x7FFFFFFF:
+            raise Error("grpc: initial_window_size exceeds 2^31-1")
         if self.max_read_bytes_per_event <= 0:
             raise Error("grpc: max_read_bytes_per_event must be positive")
         if self.max_read_bytes_per_event > 0x7FFFFFFF:
@@ -369,7 +378,11 @@ struct _PollingConnection(Movable):
         config: PollingServerConfig,
         var peer_certificate: Optional[PeerCertificate] = None,
     ) raises:
-        self.h2 = Http2Connection(transport^, is_client=False)
+        self.h2 = Http2Connection(
+            transport^,
+            is_client=False,
+            initial_window_size=config.initial_window_size,
+        )
         self.peer_certificate = peer_certificate^
         self.accepted_ns = Int64(monotonic())
         self.last_activity_ns = self.accepted_ns

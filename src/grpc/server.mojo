@@ -36,7 +36,7 @@ exceptions surface as UNKNOWN.
 from std.time import monotonic
 
 from hpack import HeaderField
-from h2 import ERR_NO_ERROR, Http2Connection
+from h2 import DEFAULT_WINDOW_SIZE, ERR_NO_ERROR, Http2Connection
 from net import TCPListener, UnixListener
 from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext
@@ -413,6 +413,8 @@ struct Server(Movable):
     with no boxing), then call `serve`. See examples/echo_server.mojo for a
     complete service. `set_max_message_size` caps unary and streaming
     request and response payloads; the default is 4 MiB.
+    `set_initial_window_size` advertises SETTINGS_INITIAL_WINDOW_SIZE on
+    each accepted connection (default 65,535).
     """
 
     var host: String
@@ -431,6 +433,8 @@ struct Server(Movable):
     """Whether a Unix listener may remove an existing socket file."""
     var max_message_size: Int
     """Maximum serialized request or response size, default 4 MiB."""
+    var initial_window_size: UInt32
+    """Per-stream receive window advertised as SETTINGS_INITIAL_WINDOW_SIZE."""
 
     def __init__(out self, host: StringSpan, port: UInt16):
         """Constructs a server with an empty routing table.
@@ -448,6 +452,7 @@ struct Server(Movable):
         self._unix_path = None
         self._unix_remove_existing = False
         self.max_message_size = DEFAULT_MAX_RECV_MESSAGE_SIZE
+        self.initial_window_size = DEFAULT_WINDOW_SIZE
 
     def set_max_message_size(mut self, size: Int) raises:
         """Sets the serialized request and response size limit.
@@ -464,6 +469,20 @@ struct Server(Movable):
         if size > 0xFFFFFFFF:
             raise Error("grpc: max_message_size exceeds the gRPC prefix")
         self.max_message_size = size
+
+    def set_initial_window_size(mut self, size: UInt32) raises:
+        """Sets the HTTP/2 SETTINGS_INITIAL_WINDOW_SIZE advertised to peers.
+
+        Args:
+            size: Per-stream receive window in bytes. Default 65,535.
+                Must not exceed 2^31-1.
+
+        Raises:
+            If `size` is greater than 2_147_483_647.
+        """
+        if size > 0x7FFFFFFF:
+            raise Error("grpc: initial_window_size exceeds 2^31-1")
+        self.initial_window_size = size
 
     @staticmethod
     def tls(
@@ -838,9 +857,10 @@ struct Server(Movable):
         Raises:
             If the TCP listener cannot bind the configured host and port,
             or the Unix listener cannot bind its configured path, or
-            `max_message_size` is invalid.
+            `max_message_size` or `initial_window_size` is invalid.
         """
         self.set_max_message_size(self.max_message_size)
+        self.set_initial_window_size(self.initial_window_size)
         if self._unix_path:
             var path = self._unix_path.value().copy()
             var listener = UnixListener(
@@ -851,7 +871,11 @@ struct Server(Movable):
                 var unix = listener.accept()
                 try:
                     var transport = GrpcTransport.local(unix^)
-                    var conn = Http2Connection(transport^, is_client=False)
+                    var conn = Http2Connection(
+                        transport^,
+                        is_client=False,
+                        initial_window_size=self.initial_window_size,
+                    )
                     try:
                         self._serve_connection_impl(conn)
                     except:
@@ -883,7 +907,11 @@ struct Server(Movable):
                     transport = GrpcTransport.secure(tls^)
                 else:
                     transport = GrpcTransport.plaintext(tcp^)
-                var conn = Http2Connection(transport^, is_client=False)
+                var conn = Http2Connection(
+                    transport^,
+                    is_client=False,
+                    initial_window_size=self.initial_window_size,
+                )
                 try:
                     self._serve_connection_impl(conn)
                 except:

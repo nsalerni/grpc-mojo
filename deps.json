@@ -8,7 +8,7 @@
       "ref": "v0.4.0"
     },
     "mojo-http2": {
-      "ref": "v0.2.6"
+      "ref": "v0.2.7"
     },
     "mojo-tls": {
       "ref": "v0.3.0"
