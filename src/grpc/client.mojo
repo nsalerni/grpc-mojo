@@ -227,6 +227,11 @@ struct GrpcChannel(Movable):
         return True
 
     def _clear_deadline(mut self) raises:
+        """Clears the call deadline and the socket read timeout.
+
+        Raises:
+            On connection I/O errors while resetting `SO_RCVTIMEO`.
+        """
         if self.deadline_ns != 0:
             self.deadline_ns = 0
             self.conn.stream.set_read_timeout(0)
@@ -674,11 +679,11 @@ struct GrpcChannel(Movable):
 struct ServerStreamingCall[Resp: ProtoMessage](Movable):
     """Typed handle for one server-streaming RPC.
 
-    Parameters:
-        Resp: The response message type.
-
     Holds an untracked pointer to the `GrpcChannel` that started the call.
     Do not store it after the channel is closed or moved.
+
+    Parameters:
+        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -783,12 +788,12 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
 struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Typed handle for one client-streaming RPC.
 
+    Holds an untracked pointer to the `GrpcChannel` that started the call.
+    Do not store it after the channel is closed or moved.
+
     Parameters:
         Req: The request message type.
         Resp: The response message type.
-
-    Holds an untracked pointer to the `GrpcChannel` that started the call.
-    Do not store it after the channel is closed or moved.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -896,15 +901,15 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
 struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Typed handle for one bidirectional streaming RPC.
 
-    Parameters:
-        Req: The request message type.
-        Resp: The response message type.
-
     Recv-driven ping-pong works on one thread: `recv` pumps the connection
     until the next message. Full-duplex firehose needs threads, which Mojo
     1.0 does not expose. Holds an untracked pointer to the `GrpcChannel`
     that started the call; do not store it after the channel is closed or
     moved.
+
+    Parameters:
+        Req: The request message type.
+        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -997,7 +1002,11 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         return msg^
 
     def close_send(mut self) raises:
-        """Half-closes the request stream without sending a message."""
+        """Half-closes the request stream without sending a message.
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
         if self._send_closed:
             return
         self._channel[].close_send(self.sid)
