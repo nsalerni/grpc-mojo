@@ -35,7 +35,7 @@ pixi run example-client -- PORT  # terminal 2
 Generate Mojo from a `.proto` (plugin comes from [protomojo](https://github.com/nsalerni/protomojo)):
 
 ```sh
-python3 -m grpc_tools.protoc -Iexamples \
+pixi run python -m grpc_tools.protoc -Iexamples \
   --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo \
   --mojo_out=examples examples/echo.proto
 ```

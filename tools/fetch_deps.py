@@ -7,7 +7,7 @@ directory (grpc-mojo uses packages/<name>; mojo-http2 and mojo-tls use
 .deps/<name>) so include paths keep working.
 
 Already-present directories are left untouched, so a local clone wins over
-a fresh fetch. Use --update to fast-forward previously fetched clones to
+a fresh fetch. Use --update to check out previously fetched clones at
 their pinned ref.
 
 URL selection: $GIT_URL_TEMPLATE (default
@@ -43,11 +43,18 @@ def main() -> int:
                 print(f"  {name}: already present at {dest} (skipped)")
                 continue
             subprocess.run(["git", "-C", str(dest), "fetch", "origin", ref], check=True)
-            subprocess.run(["git", "-C", str(dest), "checkout", ref], check=True)
-            subprocess.run(
-                ["git", "-C", str(dest), "pull", "--ff-only", "origin", ref],
-                check=False,
+            # Pins are tags (vX.Y.Z), so checkout after fetch is the update.
+            # `git pull --ff-only` fails on detached tag HEADs and used to be
+            # ignored, which reported success on a stale clone.
+            checkout = subprocess.run(
+                ["git", "-C", str(dest), "checkout", "--detach", ref],
             )
+            if checkout.returncode != 0:
+                print(
+                    f"  {name}: failed to check out {ref}",
+                    file=sys.stderr,
+                )
+                return 1
             print(f"  {name}: updated to {ref}")
             continue
         url = dep.get("url") or template.format(name=name)

@@ -4,7 +4,7 @@ grpc-mojo implements [gRPC over HTTP/2](https://github.com/grpc/grpc/blob/master
 for Mojo 1.0. The stack is split across five repositories, the same way
 `tonic` splits gRPC, HTTP/2, and codegen.
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │  grpc        gRPC core: calls, status, metadata,     │
 │              length-prefixed framing, client/server  │
@@ -31,7 +31,7 @@ Edges point strictly downward.
 | `proto` | [protomojo](https://github.com/nsalerni/protomojo) | standard library only |
 | `tls` | [mojo-tls](https://github.com/nsalerni/mojo-tls) | `net`, libssl |
 | `h2` | [mojo-http2](https://github.com/nsalerni/mojo-http2) | `hpack`, `net`, `tls` |
-| `grpc` | this repo (`src/grpc`) | `h2`, `proto`, `net`, `tls` |
+| `grpc` | this repo (`src/grpc`) | `h2`, `proto`, `hpack`, `net`, `tls` |
 
 Development checkouts clone the pinned sibling tags into gitignored
 `packages/` (`python3 tools/fetch_deps.py`). See

@@ -9,16 +9,18 @@ the official gRPC interop cases against `grpcio`.
 ## Invocation
 
 `pixi run gen-proto` runs this in the project environment, which includes
-`grpcio-tools`. Outside Pixi, install `grpcio-tools` in the active
-`python3` environment before invoking the plugin:
+`grpcio-tools`. Inside this repo:
 
 ```sh
-python3 -m grpc_tools.protoc \
+pixi run python -m grpc_tools.protoc \
   -I path/to/protos \
   --plugin=protoc-gen-mojo=packages/protomojo/tools/protoc-gen-mojo \
   --mojo_out=OUT_DIR \
   your.proto
 ```
+
+Outside Pixi, install `grpcio-tools` in the active `python3` environment
+and invoke the same plugin path with `python3 -m grpc_tools.protoc`.
 
 One Mojo module is emitted per `.proto` file in the request — including
 transitively imported dependencies (well-known types included) — named after

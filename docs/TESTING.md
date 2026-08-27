@@ -30,7 +30,7 @@ differential check if the behavior is visible on the wire.
 
 ## Layout
 
-```
+```text
 src/grpc/                     gRPC implementation
 test/integration/             gRPC end-to-end tests
 test/compliance/              gRPC vs grpcio + aggregated sibling suites
