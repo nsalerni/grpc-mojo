@@ -15,8 +15,9 @@
   handlers, one thread, multi-process for load.
 - Added `GrpcChannel.set_max_message_size` so clients cap serialized
   request and response payloads with the same 4 MiB default as `Server`
-  and `PollingServer`. Oversized sends raise before the request is
-  written; oversized responses raise from `recv_message`.
+  and `PollingServer`. Oversized unary requests fail before headers are
+  sent. Oversized streaming sends and responses reset the stream with
+  RST_STREAM(CANCEL).
 - Added `Server.set_max_message_size` so the blocking server admits
   request and response payloads with the same 4 MiB default as
   `PollingServer`. Oversized messages finish the call with

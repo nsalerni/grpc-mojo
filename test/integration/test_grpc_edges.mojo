@@ -437,6 +437,18 @@ def test_channel_max_message_size() raises:
     assert_true(raised, "over-wide channel max must raise")
 
     rig.channel.set_max_message_size(4)
+    raised = False
+    try:
+        _ = rig.channel.unary_bytes(
+            "/echo.Echo/Say",
+            Span(encode(EchoRequest(message="hello"))),
+            Metadata(),
+        )
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "unary_bytes must reject oversized requests before headers")
+
     var sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
     raised = False
     try:
@@ -447,6 +459,21 @@ def test_channel_max_message_size() raises:
         raised = True
         assert_true("exceeds max size" in String(e), String(e))
     assert_true(raised, "oversized request must raise")
+    assert_true(
+        Bool(rig.channel.conn.streams[sid].reset_code),
+        "oversized send must RST_STREAM",
+    )
+
+    rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest(message="x"))), last=True
+    )
+    rig.pump_until_reply()
+    var recovered = rig.channel.recv_response_bytes(sid)
+    assert_true(Bool(recovered), "a later call after oversized send must complete")
+    var result = rig.channel.finish(sid)
+    assert_true(result.status.is_ok(), result.status.message)
     rig.channel.close()
     rig.server_conn.close()
 
@@ -464,6 +491,23 @@ def test_channel_max_message_size() raises:
         raised = True
         assert_true("exceeds max size" in String(e), String(e))
     assert_true(raised, "oversized response must raise")
+    assert_true(
+        Bool(rig.channel.conn.streams[sid].reset_code),
+        "oversized recv must RST_STREAM",
+    )
+
+    rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest(message="x"))), last=True
+    )
+    rig.pump_until_reply()
+    recovered = rig.channel.recv_response_bytes(sid)
+    assert_true(
+        Bool(recovered), "a later call after oversized recv must complete"
+    )
+    result = rig.channel.finish(sid)
+    assert_true(result.status.is_ok(), result.status.message)
     rig.channel.close()
     rig.server_conn.close()
 

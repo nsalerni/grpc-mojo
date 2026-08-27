@@ -244,6 +244,22 @@ struct GrpcChannel(Movable):
         self.conn._ensure_stream(sid)
         self.conn.streams[sid].reset_code = ERR_CANCEL
 
+    def _reset_on_size_error(mut self, sid: UInt32):
+        try:
+            self.cancel(sid)
+        except:
+            pass
+
+    def _recv_capped(mut self, sid: UInt32) raises -> Optional[List[Byte]]:
+        try:
+            return recv_message(
+                self.conn, sid, max_size=self.max_message_size
+            )
+        except e:
+            if String(e) == "grpc: message exceeds max size":
+                self._reset_on_size_error(sid)
+            raise e
+
     def start_call(
         mut self,
         path: StringSpan,
@@ -322,9 +338,11 @@ struct GrpcChannel(Movable):
 
         Raises:
             If `payload` exceeds `max_message_size`, or on connection I/O
-            or HTTP/2 protocol errors.
+            or HTTP/2 protocol errors. An oversized payload resets `sid`
+            with RST_STREAM(CANCEL) before raising.
         """
         if len(payload) > self.max_message_size:
+            self._reset_on_size_error(sid)
             raise Error("grpc: message exceeds max size")
         send_message(self.conn, sid, payload, end_stream=last)
 
@@ -359,9 +377,10 @@ struct GrpcChannel(Movable):
 
         Raises:
             On framing or connection errors, or when the message exceeds
-            `max_message_size`.
+            `max_message_size`. An oversized response resets `sid` with
+            RST_STREAM(CANCEL) before raising.
         """
-        return recv_message(self.conn, sid, max_size=self.max_message_size)
+        return self._recv_capped(sid)
 
     def send_msg[
         M: ProtoMessage
@@ -409,9 +428,7 @@ struct GrpcChannel(Movable):
             self.cancel(sid)
             raise Error("grpc: DEADLINE_EXCEEDED")
         try:
-            var raw = recv_message(
-                self.conn, sid, max_size=self.max_message_size
-            )
+            var raw = self._recv_capped(sid)
             if raw:
                 return decode[M](Span(raw.value()))
             return None
@@ -554,9 +571,12 @@ struct GrpcChannel(Movable):
             response (empty when the status is not OK).
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors other than a
-            deadline expiry.
+            If `request` exceeds `max_message_size`, or on connection I/O
+            or HTTP/2 protocol errors other than a deadline expiry.
+            Oversized unary requests fail before request headers are sent.
         """
+        if len(request) > self.max_message_size:
+            raise Error("grpc: message exceeds max size")
         var sid = self.start_call(path, metadata, timeout_ns=timeout_ns)
         self.send_request_bytes(sid, request, last=True)
         var response = List[Byte]()
