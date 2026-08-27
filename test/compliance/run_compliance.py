@@ -652,8 +652,11 @@ def section_grpc_client(tmp: Path):
         t0 = time.monotonic()
         r = run_tool("grpc_client_probe", port, "sleep", 300)
         took = time.monotonic() - t0
+        # run_tool uses `mojo run`, so this includes probe compile. Ubuntu
+        # CI is about 3.7s compile plus the 300ms deadline. The server
+        # sleeps 5s, so 4.5s still fails a missed deadline.
         record("grpc", "client deadline enforced vs sleeping server (300ms -> DEADLINE_EXCEEDED)",
-               "code=4" in r.stdout and took < 4.0,
+               "code=4" in r.stdout and took < 4.5,
                f"out={r.stdout.strip()!r} took={took:.2f}s")
     finally:
         server.stop(0)
