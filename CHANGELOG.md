@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `PollingServer` poll timeouts use remaining time until the next keepalive
+  PING instead of the full interval, stay gated on the HTTP/2 preface, and
+  do not delay an expired idle or RPC deadline with a later PING timer.
 - `PollingServerConfig.keepalive_interval_ns` queues HTTP/2 keepalive PINGs
   from the Poller loop after an idle interval. 0 (the default) disables
   them. PINGs wait until the client connection preface is complete.

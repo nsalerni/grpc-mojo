@@ -124,7 +124,8 @@ struct PollingServerConfig(Copyable, Movable):
             keepalive_interval_ns: Idle nanoseconds before
                 `Http2Connection.maybe_keepalive_ping` queues a PING. 0
                 disables keepalive. PINGs are caller-driven from the Poller
-                loop; there is no internal timer.
+                loop; there is no internal timer. The poll timeout uses
+                time remaining since last activity, not the full interval.
         """
         self.max_connections = max_connections
         self.max_accepts_per_event = max_accepts_per_event
@@ -232,6 +233,30 @@ def _coalesce_poll_events(events: Span[PollEvent, _]) -> List[_ReadyEvent]:
 def _can_move_http2_output(io_blocked_read: Bool, io_wants_write: Bool) -> Bool:
     """Keeps one output store while SSL_read awaits writable readiness."""
     return not (io_blocked_read and io_wants_write)
+
+
+def _keepalive_remaining_ns(
+    interval_ns: Int64, last_activity_ns: Int64, now_ns: Int64
+) -> Int64:
+    """Nanoseconds until a keepalive PING is due; 0 if already due."""
+    var ka = interval_ns - (now_ns - last_activity_ns)
+    if ka < 0:
+        return 0
+    return ka
+
+
+def _merge_poll_remaining(closest: Int64, remaining: Int64) -> Int64:
+    """Keeps the soonest remaining timeout.
+
+    `closest` of -1 means none yet. `remaining` below 0 is ignored so a
+    disabled timer does not change the current bound. A due timeout of 0
+    is not replaced by a later positive remaining.
+    """
+    if remaining < 0:
+        return closest
+    if closest < 0 or remaining < closest:
+        return remaining
+    return closest
 
 
 struct _PendingWrite(Movable, Sized):
@@ -1124,30 +1149,37 @@ struct PollingServer(Movable):
             var idle = connections[fd].idle_remaining(
                 now, self.config.idle_timeout_ms
             )
-            if closest < 0 or idle < closest:
-                closest = idle
+            if idle <= 0:
+                return 0
+            closest = _merge_poll_remaining(closest, idle)
             var incomplete = connections[fd].incomplete_request_remaining(
                 now, self.config.incomplete_request_timeout_ms
             )
             if connections[fd].has_incomplete_request():
                 if incomplete <= 0:
                     return 0
-                if closest < 0 or incomplete < closest:
-                    closest = incomplete
+                closest = _merge_poll_remaining(closest, incomplete)
             # An unsent suffix already has writable interest. Deferring the
             # RPC deadline until that suffix moves avoids a zero-timeout spin;
             # no later response bytes are queued before the next check.
-            var remaining: Int64 = -1
             if len(connections[fd].output) == 0:
-                remaining = connections[fd].deadline_remaining(now)
-            if remaining >= 0 and (closest < 0 or remaining < closest):
-                closest = remaining
-            if self.config.keepalive_interval_ns > 0:
-                if (
-                    closest < 0
-                    or self.config.keepalive_interval_ns < closest
-                ):
-                    closest = self.config.keepalive_interval_ns
+                if connections[fd].deadline_expired(now):
+                    return 0
+                closest = _merge_poll_remaining(
+                    closest, connections[fd].deadline_remaining(now)
+                )
+            if (
+                self.config.keepalive_interval_ns > 0
+                and connections[fd].h2.input_preface_complete()
+            ):
+                closest = _merge_poll_remaining(
+                    closest,
+                    _keepalive_remaining_ns(
+                        self.config.keepalive_interval_ns,
+                        connections[fd].last_activity_ns,
+                        now,
+                    ),
+                )
         if closest < 0:
             return -1
         if closest <= 0:

@@ -8,6 +8,8 @@ from grpc.polling_server import (
     _PendingWrite,
     _can_move_http2_output,
     _coalesce_poll_events,
+    _keepalive_remaining_ns,
+    _merge_poll_remaining,
 )
 from net import PollEvent
 
@@ -241,9 +243,36 @@ def test_blocked_tls_read_preserves_one_output_store() raises:
     assert_true(not _can_move_http2_output(True, True))
 
 
+def test_keepalive_poll_remaining() raises:
+    var interval: Int64 = 30_000_000_000
+    var last: Int64 = 1_000_000_000
+    var elapsed: Int64 = 1_000_000_000
+    assert_equal(
+        _keepalive_remaining_ns(interval, last, last + elapsed),
+        interval - elapsed,
+    )
+    assert_equal(_keepalive_remaining_ns(interval, last, last + interval), 0)
+    assert_equal(
+        _keepalive_remaining_ns(interval, last, last + interval + 5_000_000),
+        0,
+    )
+
+    var none_yet: Int64 = -1
+    var due: Int64 = 0
+    var idle: Int64 = 60_000_000_000
+    var keepalive: Int64 = 5_000_000_000
+    var skipped: Int64 = -1
+    assert_equal(_merge_poll_remaining(none_yet, interval), interval)
+    assert_equal(_merge_poll_remaining(idle, keepalive), keepalive)
+    assert_equal(_merge_poll_remaining(due, interval), due)
+    assert_equal(_merge_poll_remaining(keepalive, skipped), keepalive)
+    assert_equal(_merge_poll_remaining(due, skipped), due)
+
+
 def main() raises:
     test_config_and_registration()
     test_duplicate_poll_events_coalesce()
     test_partial_write_keeps_exact_suffix()
     test_blocked_tls_read_preserves_one_output_store()
+    test_keepalive_poll_remaining()
     print("test_polling_server: all tests passed")
