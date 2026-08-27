@@ -42,12 +42,14 @@ def main() -> int:
             if not update:
                 print(f"  {name}: already present at {dest} (skipped)")
                 continue
-            subprocess.run(["git", "-C", str(dest), "fetch", "origin", ref], check=True)
-            # Pins are tags (vX.Y.Z), so checkout after fetch is the update.
-            # `git pull --ff-only` fails on detached tag HEADs and used to be
-            # ignored, which reported success on a stale clone.
+            subprocess.run(
+                ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref],
+                check=True,
+            )
+            # Shallow clones store a newly fetched tag in FETCH_HEAD without
+            # always creating refs/tags/<ref>, so check out FETCH_HEAD.
             checkout = subprocess.run(
-                ["git", "-C", str(dest), "checkout", "--detach", ref],
+                ["git", "-C", str(dest), "checkout", "--detach", "FETCH_HEAD"],
             )
             if checkout.returncode != 0:
                 print(
