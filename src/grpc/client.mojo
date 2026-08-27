@@ -223,9 +223,19 @@ struct GrpcChannel(Movable):
         self.max_message_size = size
 
     def _arm_deadline(mut self) raises -> Bool:
-        """Set the socket read timeout to the remaining call budget.
-        Returns False if the deadline has already passed."""
+        """Sets the socket read timeout to the remaining call budget.
+
+        A zero deadline clears `SO_RCVTIMEO` so an earlier timed call
+        cannot make this receive fail.
+
+        Returns:
+            False if the deadline has already passed.
+
+        Raises:
+            On connection I/O errors while setting `SO_RCVTIMEO`.
+        """
         if self.deadline_ns == 0:
+            self.conn.stream.set_read_timeout(0)
             return True
         var remaining = self.deadline_ns - Int64(monotonic())
         if remaining <= 0:
@@ -239,9 +249,8 @@ struct GrpcChannel(Movable):
         Raises:
             On connection I/O errors while resetting `SO_RCVTIMEO`.
         """
-        if self.deadline_ns != 0:
-            self.deadline_ns = 0
-            self.conn.stream.set_read_timeout(0)
+        self.deadline_ns = 0
+        self.conn.stream.set_read_timeout(0)
 
     def cancel(mut self, sid: UInt32) raises:
         """Cancels an in-flight call with RST_STREAM(CANCEL).
@@ -472,9 +481,19 @@ struct GrpcChannel(Movable):
             responses are consumed via `recv_msg`).
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors.
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            connection I/O or HTTP/2 protocol errors.
         """
-        self.conn.wait_stream_end(sid)
+        if not self._arm_deadline():
+            self.cancel(sid)
+            raise Error("grpc: DEADLINE_EXCEEDED")
+        try:
+            self.conn.wait_stream_end(sid)
+        except e:
+            if is_timeout_error(e):
+                self.cancel(sid)
+                raise Error("grpc: DEADLINE_EXCEEDED")
+            raise e
         var status = self._extract_status(sid)
         var initial = Metadata()
         var trailing = Metadata()
@@ -787,7 +806,8 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
             consumed through `recv`.
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors.
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            connection I/O or HTTP/2 protocol errors.
         """
         self._channel[].deadline_ns = self._deadline_ns
         return self._channel[].finish(self.sid)
@@ -899,8 +919,9 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             The decoded response message.
 
         Raises:
-            The call's `Status` when it is not OK, or if the server sent
-            no response message.
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; the call's
+            `Status` when it is not OK; or if the server sent no response
+            message.
         """
         self.close_send()
         self._channel[].deadline_ns = self._deadline_ns
@@ -1051,7 +1072,8 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
             consumed through `recv`.
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors.
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            connection I/O or HTTP/2 protocol errors.
         """
         self._channel[].deadline_ns = self._deadline_ns
         return self._channel[].finish(self.sid)

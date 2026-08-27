@@ -9,7 +9,10 @@
   `start_call` / `send_msg` / `recv_msg` / `finish` path remains.
   Typed call objects copy the channel deadline at start and restore it
   before `recv` / `finish`, so overlapping timed calls keep independent
-  budgets. `GrpcChannel.finish` and `cancel` clear a call deadline so the
+  budgets. A zero restored deadline clears `SO_RCVTIMEO` so an untimed
+  receive does not inherit an earlier call's socket timeout. `finish`
+  arms the remaining timeout while waiting for trailers.
+  `GrpcChannel.finish` and `cancel` clear a call deadline so the
   next call on the same channel is not bound by a leftover `SO_RCVTIMEO`.
 - `PollingServer` poll timeouts use remaining time until the next keepalive
   PING instead of the full interval, stay gated on the HTTP/2 preface, and

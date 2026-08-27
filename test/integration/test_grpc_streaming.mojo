@@ -3,6 +3,7 @@
 # kernel; the server handler then runs to completion; client reads after).
 
 from std.testing import assert_equal, assert_true
+from std.time import sleep
 
 from h2 import Http2Connection
 from grpc import (
@@ -262,6 +263,36 @@ def test_typed_call_keeps_own_deadline() raises:
     rig.server_conn.close()
 
 
+def test_untimed_recv_does_not_inherit_socket_timeout() raises:
+    var rig = make_rig()
+    var timed = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="a"),
+        timeout_ns=50_000_000,
+    )
+    rig.pump_server_until_reply()
+    var timed_msg = timed.recv()
+    assert_true(Bool(timed_msg), "timed recv delivered")
+    var untimed = ServerStreamingCall[EchoResponse].start[EchoRequest](
+        rig.channel,
+        "/echo.Echo/Split",
+        EchoRequest(message="b"),
+    )
+    rig.pump_server_until_reply()
+    sleep(0.12)
+    var untimed_msg = untimed.recv()
+    assert_true(
+        Bool(untimed_msg),
+        "untimed recv must not inherit the expired 50ms socket timeout",
+    )
+    assert_equal(untimed_msg.value().message, "b")
+    timed.cancel()
+    untimed.cancel()
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_streaming_handler_error() raises:
     var rig = make_rig()
     var sid = rig.channel.start_call("/echo.Echo/FailStream", Metadata())
@@ -292,5 +323,6 @@ def main() raises:
     test_typed_client_streaming_call()
     test_typed_bidi_call()
     test_typed_call_keeps_own_deadline()
+    test_untimed_recv_does_not_inherit_socket_timeout()
     test_streaming_handler_error()
     print("test_grpc_streaming: all tests passed")

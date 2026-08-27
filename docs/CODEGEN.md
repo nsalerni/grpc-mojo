@@ -9,6 +9,10 @@ binary and JSON tests) and drives the official gRPC interop cases against
 
 ## Invocation
 
+`pixi run gen-proto` runs this in the project environment, which includes
+`grpcio-tools`. Outside Pixi, install `grpcio-tools` in the active
+`python3` environment before invoking the plugin:
+
 ```sh
 python3 -m grpc_tools.protoc \
   -I path/to/protos \
