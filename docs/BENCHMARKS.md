@@ -5,7 +5,9 @@ on the same three shapes:
 
 1. Unary echo, 11-byte message
 2. Unary echo, 64 KiB message
-3. Bidi ping-pong, 20 messages on one stream (reported per message)
+3. Bidi ping-pong, 20 messages on one stream (reported per message).
+   Each implementation waits for the matching response before sending
+   the next request.
 
 Each implementation runs its own client against its own server on
 `127.0.0.1`. grpc-mojo forks the server because Mojo 1.0 has no threads;
@@ -33,8 +35,9 @@ and wiring check.
 ## What the numbers mean
 
 Each shape records wall-clock nanoseconds for a complete RPC (or, for
-bidi, one 20-message stream). The table prints **mean** and **p99** of
-those samples. Bidi is divided by 20 so the column is per-message.
+bidi, one 20-message ping-pong stream). The table prints **mean** and
+**p99** of those samples. Bidi is divided by 20 so the column is
+per-message.
 
 Warmup is two untimed unary calls. There is no keepalive, TLS, or
 multi-channel load. This is a single-connection loopback comparison, not

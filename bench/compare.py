@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
+import queue
 import shutil
 import statistics
 import subprocess
@@ -39,6 +39,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def iter_count(args: argparse.Namespace) -> int:
+    if args.iters < 0:
+        raise SystemExit("--iters must be positive")
     if args.iters > 0:
         return args.iters
     return SMOKE_ITERS if args.smoke else DEFAULT_ITERS
@@ -117,14 +119,19 @@ def bench_grpcio(iters: int) -> dict[str, object]:
             samples = []
             for _ in range(iters):
                 start = time.perf_counter_ns()
+                acked = queue.SimpleQueue()
 
                 def messages():
                     for i in range(20):
                         yield echo_pb2.EchoRequest(message=str(i))
+                        acked.get()
 
-                responses = stub.Chat(messages())
-                for _ in responses:
-                    pass
+                n = 0
+                for _ in stub.Chat(messages()):
+                    n += 1
+                    acked.put(None)
+                if n != 20:
+                    raise RuntimeError(f"grpcio bidi expected 20 replies, got {n}")
                 samples.append(time.perf_counter_ns() - start)
             return samples
 
@@ -142,8 +149,8 @@ def bench_grpcio(iters: int) -> dict[str, object]:
         return result
 
 
-def mojo_command(iters: int, smoke: bool) -> list[str]:
-    command = [
+def mojo_command(iters: int) -> list[str]:
+    return [
         "mojo",
         "run",
         "-I",
@@ -159,10 +166,8 @@ def mojo_command(iters: int, smoke: bool) -> list[str]:
         "-I",
         "test",
         str(ROOT / "bench" / "compare_grpc.mojo"),
+        f"--iters={iters}",
     ]
-    if smoke or iters == SMOKE_ITERS:
-        command.append("--smoke")
-    return command
 
 
 def parse_json_object(text: str) -> dict[str, object]:
@@ -179,9 +184,9 @@ def parse_json_object(text: str) -> dict[str, object]:
     raise RuntimeError(f"no JSON object in command output:\n{text[-500:]}")
 
 
-def bench_mojo(iters: int, smoke: bool) -> dict[str, object]:
+def bench_mojo(iters: int) -> dict[str, object]:
     completed = subprocess.run(
-        mojo_command(iters, smoke),
+        mojo_command(iters),
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -241,11 +246,7 @@ def main() -> int:
         f"(loopback, one client, one server, no git-diff of nanoseconds)",
         flush=True,
     )
-    rows = [bench_grpcio(iters)]
-    try:
-        rows.append(bench_mojo(iters, args.smoke))
-    except (OSError, subprocess.CalledProcessError) as error:
-        print(f"grpc-mojo: skipped ({error})", file=sys.stderr)
+    rows = [bench_grpcio(iters), bench_mojo(iters)]
     tonic = bench_tonic(iters, args.require_tonic)
     if tonic is not None:
         rows.append(tonic)

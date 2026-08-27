@@ -12,7 +12,8 @@
 
 Forks a child server (Mojo 1.0 has no threads) and reports mean and p99
 nanoseconds for unary 11B, unary 64KiB, and 20-message bidi ping-pong.
-Prints one JSON object on stdout. Pass `--smoke` for a short CI run.
+Prints one JSON object on stdout. Pass `--smoke` for 5 iterations or
+`--iters=N` for a custom count (`--smoke` wins).
 """
 
 from std.ffi import c_int, external_call
@@ -33,17 +34,19 @@ from net import TCPListener
 from proto import encode
 
 
-def is_smoke() -> Bool:
+def iter_count() raises -> Int:
+    var requested = 200
+    var smoke = False
     for a in argv():
         if a == "--smoke":
-            return True
-    return False
-
-
-def iter_count() -> Int:
-    if is_smoke():
+            smoke = True
+        elif a.startswith("--iters="):
+            requested = Int(String(a[byte=8:]))
+            if requested < 1:
+                raise Error("bench: --iters must be positive")
+    if smoke:
         return 5
-    return 200
+    return requested
 
 
 def percentile_ns(mut samples: List[Int64], p: Int) -> Int64:

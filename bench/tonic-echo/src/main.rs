@@ -155,11 +155,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut bidi = Vec::with_capacity(iters);
     for _ in 0..iters {
         let start = Instant::now();
-        let outbound = tokio_stream::iter((0..20).map(|i| EchoRequest {
-            message: i.to_string(),
-        }));
-        let mut stream = client.chat(Request::new(outbound)).await?.into_inner();
-        while stream.message().await?.is_some() {}
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let mut stream = client
+            .chat(Request::new(ReceiverStream::new(rx)))
+            .await?
+            .into_inner();
+        for i in 0..20 {
+            tx.send(EchoRequest {
+                message: i.to_string(),
+            })
+            .await?;
+            if stream.message().await?.is_none() {
+                return Err("tonic bidi ended early".into());
+            }
+        }
+        drop(tx);
         bidi.push(start.elapsed().as_nanos());
     }
 
