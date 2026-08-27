@@ -741,6 +741,47 @@ def make_e2e_rig() raises -> E2ERig:
     )
 
 
+def test_server_initial_window_size() raises:
+    var server = Server("127.0.0.1", 0)
+    assert_equal(Int(server.initial_window_size), 65535)
+
+    def too_large() raises:
+        var s = Server("127.0.0.1", 0)
+        s.set_initial_window_size(0x80000000)
+
+    assert_true(
+        "initial_window_size" in expect_error(too_large, "window"),
+    )
+    server.set_initial_window_size(1048576)
+    assert_equal(Int(server.initial_window_size), 1048576)
+
+
+def test_channel_initial_window_size() raises:
+    def too_large() raises:
+        _ = GrpcChannel.connect(
+            "127.0.0.1", 1, initial_window_size=0x80000000
+        )
+
+    assert_true(
+        "initial_window_size" in expect_error(too_large, "window"),
+    )
+
+    var listener = TCPListener("127.0.0.1", 0)
+    var channel = GrpcChannel.connect(
+        "127.0.0.1", listener.local_port, initial_window_size=1048576
+    )
+    var server_tcp = listener.accept()
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
+    listener.close()
+    assert_equal(Int(channel.conn.our_settings.initial_window_size), 1048576)
+    while not server_conn.peer_settings_received:
+        server_conn.process_next_frame()
+    assert_equal(Int(server_conn.peer_settings.initial_window_size), 1048576)
+    channel.close()
+    server_conn.close()
+
+
 def test_streaming_abort() raises:
     var rig = make_e2e_rig()
     var sid = rig.channel.start_call("/echo.Echo/Denied", Metadata())
@@ -870,6 +911,8 @@ def main() raises:
     test_recv_message_errors()
     test_server_max_message_size()
     test_channel_max_message_size()
+    test_server_initial_window_size()
+    test_channel_initial_window_size()
     test_handler_size_wording_stays_unknown()
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()

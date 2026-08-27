@@ -68,6 +68,18 @@ def test_config_and_registration() raises:
 
     raised = False
     try:
+        var huge_window = PollingServerConfig(initial_window_size=0x80000000)
+        huge_window.validate()
+    except:
+        raised = True
+    assert_true(raised, "initial window must fit the RFC 31-bit maximum")
+
+    var wide = PollingServerConfig(initial_window_size=1048576)
+    wide.validate()
+    assert_equal(Int(wide.initial_window_size), 1048576)
+
+    raised = False
+    try:
         var no_accepts = PollingServerConfig(max_accepts_per_event=0)
         no_accepts.validate()
     except:

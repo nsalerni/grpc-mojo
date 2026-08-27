@@ -30,7 +30,7 @@ deadline; a later `start_call` replaces it.
 from std.time import monotonic
 
 from hpack import HeaderField
-from h2 import ERR_CANCEL, Http2Connection
+from h2 import DEFAULT_WINDOW_SIZE, ERR_CANCEL, Http2Connection
 from net import TCPStream, UnixStream, is_timeout_error
 from tls import TLSContext
 from proto import ProtoMessage, decode, encode
@@ -49,6 +49,12 @@ from .transport import GrpcTransport
 
 comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.2.2"
 """Value sent in the user-agent request header."""
+
+
+def _require_initial_window_size(size: UInt32) raises:
+    """Rejects a SETTINGS_INITIAL_WINDOW_SIZE above the RFC 31-bit maximum."""
+    if size > 0x7FFFFFFF:
+        raise Error("grpc: initial_window_size exceeds 2^31-1")
 
 
 @fieldwise_init
@@ -75,7 +81,9 @@ struct GrpcChannel(Movable):
     `BidiStreamingCall`, or with `start_call`, `send_msg`/`send_request_bytes`,
     `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
     `set_max_message_size` caps serialized request and response payloads;
-    the default is 4 MiB.
+    the default is 4 MiB. `connect` / `connect_unix` / `connect_tls` accept
+    `initial_window_size` to advertise SETTINGS_INITIAL_WINDOW_SIZE
+    (default 65,535).
     """
 
     var conn: Http2Connection[GrpcTransport]
@@ -94,22 +102,35 @@ struct GrpcChannel(Movable):
     """Maximum serialized request or response size, default 4 MiB."""
 
     @staticmethod
-    def connect(host: StringSpan, port: UInt16) raises -> GrpcChannel:
+    def connect(
+        host: StringSpan,
+        port: UInt16,
+        *,
+        initial_window_size: UInt32 = DEFAULT_WINDOW_SIZE,
+    ) raises -> GrpcChannel:
         """Opens a TCP connection and performs the HTTP/2 client preface.
 
         Args:
             host: Server host name or address.
             port: Server TCP port.
+            initial_window_size: Per-stream receive window advertised as
+                SETTINGS_INITIAL_WINDOW_SIZE. Default 65,535.
 
         Returns:
             A ready channel with `authority` set to `host:port`.
 
         Raises:
-            On connection failure or an HTTP/2 handshake error.
+            If `initial_window_size` exceeds 2^31-1, or on connection
+            failure or an HTTP/2 handshake error.
         """
+        _require_initial_window_size(initial_window_size)
         var tcp = TCPStream.connect(host, port)
         var transport = GrpcTransport.plaintext(tcp^)
-        var conn = Http2Connection(transport^, is_client=True)
+        var conn = Http2Connection(
+            transport^,
+            is_client=True,
+            initial_window_size=initial_window_size,
+        )
         return GrpcChannel(
             conn=conn^,
             authority=String(host) + ":" + String(port),
@@ -120,7 +141,10 @@ struct GrpcChannel(Movable):
 
     @staticmethod
     def connect_unix(
-        path: StringSpan, *, authority: StringSpan = "localhost"
+        path: StringSpan,
+        *,
+        authority: StringSpan = "localhost",
+        initial_window_size: UInt32 = DEFAULT_WINDOW_SIZE,
     ) raises -> GrpcChannel:
         """Opens a Unix domain socket and performs the HTTP/2 preface.
 
@@ -128,19 +152,26 @@ struct GrpcChannel(Movable):
             path: Filesystem path of the listening Unix domain socket.
             authority: Value for the HTTP/2 `:authority` pseudo-header.
                 Defaults to `localhost`.
+            initial_window_size: Per-stream receive window advertised as
+                SETTINGS_INITIAL_WINDOW_SIZE. Default 65,535.
 
         Returns:
             A ready plaintext channel over the Unix domain socket.
 
         Raises:
-            If `authority` is empty, or on connection failure or an HTTP/2
-            handshake error.
+            If `authority` is empty, `initial_window_size` exceeds
+            2^31-1, or on connection failure or an HTTP/2 handshake error.
         """
         if authority == "":
             raise Error("grpc: Unix channel authority cannot be empty")
+        _require_initial_window_size(initial_window_size)
         var unix = UnixStream.connect(path)
         var transport = GrpcTransport.local(unix^)
-        var conn = Http2Connection(transport^, is_client=True)
+        var conn = Http2Connection(
+            transport^,
+            is_client=True,
+            initial_window_size=initial_window_size,
+        )
         return GrpcChannel(
             conn=conn^,
             authority=String(authority),
@@ -158,6 +189,7 @@ struct GrpcChannel(Movable):
         ca_file: StringSpan = "",
         cert_chain_pem: StringSpan = "",
         key_pem: StringSpan = "",
+        initial_window_size: UInt32 = DEFAULT_WINDOW_SIZE,
     ) raises -> GrpcChannel:
         """Opens a verified TLS connection with mandatory `h2` ALPN.
 
@@ -171,14 +203,18 @@ struct GrpcChannel(Movable):
                 Must be paired with `key_pem`.
             key_pem: Path to the unencrypted private key PEM file for
                 `cert_chain_pem`.
+            initial_window_size: Per-stream receive window advertised as
+                SETTINGS_INITIAL_WINDOW_SIZE. Default 65,535.
 
         Returns:
             A ready TLS channel with `:scheme` set to `https`.
 
         Raises:
-            On TCP or TLS failure, certificate rejection, missing `h2`
-            ALPN negotiation, or an HTTP/2 handshake error.
+            If `initial_window_size` exceeds 2^31-1, or on TCP or TLS
+            failure, certificate rejection, missing `h2` ALPN
+            negotiation, or an HTTP/2 handshake error.
         """
+        _require_initial_window_size(initial_window_size)
         var context = TLSContext.client(
             verify=True,
             ca_file=String(ca_file),
@@ -197,7 +233,11 @@ struct GrpcChannel(Movable):
                 "grpc: TLS peer did not negotiate the required h2 ALPN token"
             )
         var transport = GrpcTransport.secure(tls^)
-        var conn = Http2Connection(transport^, is_client=True)
+        var conn = Http2Connection(
+            transport^,
+            is_client=True,
+            initial_window_size=initial_window_size,
+        )
         return GrpcChannel(
             conn=conn^,
             authority=name.copy() + ":" + String(port),
