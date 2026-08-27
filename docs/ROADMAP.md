@@ -76,8 +76,9 @@ We propagate `grpc-timeout` correctly but nobody acts on it.
 
 ### A5. Protocol niceties *(S–M)*
 `grpc-status-details-bin` (google.rpc.Status rich errors), graceful GOAWAY
-drain on shutdown, blocking-server keepalive PING, configurable max message
-sizes and initial window.
+drain on shutdown, blocking-server keepalive PING, configurable initial
+window. Max message size is set on `Server`, `PollingServer`, and
+`GrpcChannel`.
 
 ---
 

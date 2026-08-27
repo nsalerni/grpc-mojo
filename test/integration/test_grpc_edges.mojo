@@ -33,7 +33,7 @@ from grpc import (
     status_code_name,
 )
 from hpack import HeaderField
-from h2 import Http2Connection
+from h2 import ERR_CANCEL, Http2Connection
 from net import TCPListener, TCPStream
 from proto import decode, encode
 
@@ -417,6 +417,103 @@ def test_server_max_message_size() raises:
     server_conn.close()
 
 
+def test_channel_max_message_size() raises:
+    var rig = make_e2e_rig()
+
+    var raised = False
+    try:
+        rig.channel.set_max_message_size(-1)
+    except e:
+        raised = True
+        assert_true("non-negative" in String(e), String(e))
+    assert_true(raised, "negative channel max must raise")
+
+    raised = False
+    try:
+        rig.channel.set_max_message_size(0x100000000)
+    except e:
+        raised = True
+        assert_true("prefix" in String(e), String(e))
+    assert_true(raised, "over-wide channel max must raise")
+
+    rig.channel.set_max_message_size(4)
+    raised = False
+    try:
+        _ = rig.channel.unary_bytes(
+            "/echo.Echo/Say",
+            Span(encode(EchoRequest(message="hello"))),
+            Metadata(),
+        )
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "unary_bytes must reject oversized requests before headers")
+
+    var sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    raised = False
+    try:
+        rig.channel.send_request_bytes(
+            sid, Span(encode(EchoRequest(message="hello"))), last=True
+        )
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "oversized request must raise")
+    assert_true(
+        Bool(rig.channel.conn.streams[sid].reset_code),
+        "oversized send must RST_STREAM",
+    )
+    assert_equal(rig.pump_until_reset(sid), ERR_CANCEL)
+
+    rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest(message="x"))), last=True
+    )
+    rig.pump_until_reply()
+    var recovered = rig.channel.recv_response_bytes(sid)
+    assert_true(Bool(recovered), "a later call after oversized send must complete")
+    var result = rig.channel.finish(sid)
+    assert_true(result.status.is_ok(), result.status.message)
+    rig.channel.close()
+    rig.server_conn.close()
+
+    rig = make_e2e_rig()
+    rig.channel.set_max_message_size(1)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest())), last=True
+    )
+    rig.pump_until_reply()
+    raised = False
+    try:
+        _ = rig.channel.recv_response_bytes(sid)
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "oversized response must raise")
+    assert_true(
+        Bool(rig.channel.conn.streams[sid].reset_code),
+        "oversized recv must RST_STREAM",
+    )
+    assert_equal(rig.pump_until_reset(sid), ERR_CANCEL)
+
+    rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest(message="x"))), last=True
+    )
+    rig.pump_until_reply()
+    recovered = rig.channel.recv_response_bytes(sid)
+    assert_true(
+        Bool(recovered), "a later call after oversized recv must complete"
+    )
+    result = rig.channel.finish(sid)
+    assert_true(result.status.is_ok(), result.status.message)
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_handler_size_wording_stays_unknown() raises:
     var server = Server("127.0.0.1", 0)
     server.register_unary[size_worded_handler]("/echo.Echo/Say")
@@ -609,6 +706,20 @@ struct E2ERig(Movable):
             if self.server.dispatch_ready(self.server_conn, self.handled) > 0:
                 return
 
+    def pump_until_reset(mut self, sid: UInt32) raises -> UInt32:
+        """Reads until the server records RST_STREAM on `sid`."""
+        while True:
+            var known = False
+            for id in self.server_conn.stream_ids:
+                if id == sid:
+                    known = True
+            if known:
+                var code = self.server_conn.streams[sid].reset_code
+                if code:
+                    return code.value()
+            self.server_conn.process_next_frame()
+            _ = self.server.dispatch_ready(self.server_conn, self.handled)
+
 
 def make_e2e_rig() raises -> E2ERig:
     var server = Server("127.0.0.1", 0)
@@ -758,6 +869,7 @@ def main() raises:
     test_frame_compressed_flag()
     test_recv_message_errors()
     test_server_max_message_size()
+    test_channel_max_message_size()
     test_handler_size_wording_stays_unknown()
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()
