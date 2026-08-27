@@ -775,6 +775,9 @@ def test_channel_initial_window_size() raises:
     var server_conn = Http2Connection(transport^, is_client=False)
     listener.close()
     assert_equal(Int(channel.conn.our_settings.initial_window_size), 1048576)
+    # connect() queues the preface without writing it; flush so the
+    # server can read SETTINGS instead of blocking on an empty socket.
+    channel.conn.flush_output()
     while not server_conn.peer_settings_received:
         server_conn.process_next_frame()
     assert_equal(Int(server_conn.peer_settings.initial_window_size), 1048576)
