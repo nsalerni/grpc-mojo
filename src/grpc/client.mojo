@@ -30,7 +30,7 @@ from net import TCPStream, UnixStream, is_timeout_error
 from tls import TLSContext
 from proto import ProtoMessage, decode, encode
 
-from .framing import recv_message, send_message
+from .framing import DEFAULT_MAX_RECV_MESSAGE_SIZE, recv_message, send_message
 from .metadata import Metadata, decode_bin_value
 from .status import (
     Status,
@@ -68,6 +68,8 @@ struct GrpcChannel(Movable):
     `connect`; make unary calls with `unary`/`unary_bytes`, or drive
     streaming calls with `start_call`, `send_msg`/`send_request_bytes`,
     `recv_msg`/`recv_response_bytes`, `close_send`, and `finish`.
+    `set_max_message_size` caps serialized request and response payloads;
+    the default is 4 MiB.
     """
 
     var conn: Http2Connection[GrpcTransport]
@@ -78,6 +80,8 @@ struct GrpcChannel(Movable):
     """Value for the `:scheme` pseudo-header (`http` or `https`)."""
     var deadline_ns: Int64
     """Absolute monotonic deadline for the current call; 0 = none."""
+    var max_message_size: Int
+    """Maximum serialized request or response size, default 4 MiB."""
 
     @staticmethod
     def connect(host: StringSpan, port: UInt16) raises -> GrpcChannel:
@@ -101,6 +105,7 @@ struct GrpcChannel(Movable):
             authority=String(host) + ":" + String(port),
             scheme=String("http"),
             deadline_ns=0,
+            max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
         )
 
     @staticmethod
@@ -131,6 +136,7 @@ struct GrpcChannel(Movable):
             authority=String(authority),
             scheme=String("http"),
             deadline_ns=0,
+            max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
         )
 
     @staticmethod
@@ -187,7 +193,24 @@ struct GrpcChannel(Movable):
             authority=name.copy() + ":" + String(port),
             scheme=String("https"),
             deadline_ns=0,
+            max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
         )
+
+    def set_max_message_size(mut self, size: Int) raises:
+        """Sets the serialized request and response size limit.
+
+        Args:
+            size: Maximum message bytes. `0` rejects every non-empty
+                payload. Must fit in the 32-bit gRPC length prefix.
+
+        Raises:
+            If `size` is negative or greater than 4_294_967_295.
+        """
+        if size < 0:
+            raise Error("grpc: max_message_size must be non-negative")
+        if size > 0xFFFFFFFF:
+            raise Error("grpc: max_message_size exceeds the gRPC prefix")
+        self.max_message_size = size
 
     def _arm_deadline(mut self) raises -> Bool:
         """Set the socket read timeout to the remaining call budget.
@@ -298,8 +321,11 @@ struct GrpcChannel(Movable):
                 request stream is half-closed (END_STREAM).
 
         Raises:
-            On connection I/O or HTTP/2 protocol errors.
+            If `payload` exceeds `max_message_size`, or on connection I/O
+            or HTTP/2 protocol errors.
         """
+        if len(payload) > self.max_message_size:
+            raise Error("grpc: message exceeds max size")
         send_message(self.conn, sid, payload, end_stream=last)
 
     def close_send(mut self, sid: UInt32) raises:
@@ -332,9 +358,10 @@ struct GrpcChannel(Movable):
             The message bytes, or None when the response stream ends.
 
         Raises:
-            On framing or connection errors.
+            On framing or connection errors, or when the message exceeds
+            `max_message_size`.
         """
-        return recv_message(self.conn, sid)
+        return recv_message(self.conn, sid, max_size=self.max_message_size)
 
     def send_msg[
         M: ProtoMessage
@@ -351,9 +378,10 @@ struct GrpcChannel(Movable):
                 request stream is half-closed.
 
         Raises:
-            On encoding or connection errors.
+            On encoding or connection errors, or when the encoded message
+            exceeds `max_message_size`.
         """
-        send_message(self.conn, sid, Span(encode(msg)), end_stream=last)
+        self.send_request_bytes(sid, Span(encode(msg)), last=last)
 
     def recv_msg[M: ProtoMessage](mut self, sid: UInt32) raises -> Optional[M]:
         """Receives the next typed message; None when the stream ends.
@@ -374,13 +402,16 @@ struct GrpcChannel(Movable):
 
         Raises:
             `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
-            decoding, framing, or connection errors.
+            decoding, framing, or connection errors, or when the message
+            exceeds `max_message_size`.
         """
         if not self._arm_deadline():
             self.cancel(sid)
             raise Error("grpc: DEADLINE_EXCEEDED")
         try:
-            var raw = recv_message(self.conn, sid)
+            var raw = recv_message(
+                self.conn, sid, max_size=self.max_message_size
+            )
             if raw:
                 return decode[M](Span(raw.value()))
             return None

@@ -13,6 +13,10 @@
   Requires mojo-http2 v0.2.6 and mojo-net v0.2.4.
 - Documented the blocking `Server` vs `PollingServer` contract: serial
   handlers, one thread, multi-process for load.
+- Added `GrpcChannel.set_max_message_size` so clients cap serialized
+  request and response payloads with the same 4 MiB default as `Server`
+  and `PollingServer`. Oversized sends raise before the request is
+  written; oversized responses raise from `recv_message`.
 - Added `Server.set_max_message_size` so the blocking server admits
   request and response payloads with the same 4 MiB default as
   `PollingServer`. Oversized messages finish the call with

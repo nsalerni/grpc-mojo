@@ -417,6 +417,57 @@ def test_server_max_message_size() raises:
     server_conn.close()
 
 
+def test_channel_max_message_size() raises:
+    var rig = make_e2e_rig()
+
+    var raised = False
+    try:
+        rig.channel.set_max_message_size(-1)
+    except e:
+        raised = True
+        assert_true("non-negative" in String(e), String(e))
+    assert_true(raised, "negative channel max must raise")
+
+    raised = False
+    try:
+        rig.channel.set_max_message_size(0x100000000)
+    except e:
+        raised = True
+        assert_true("prefix" in String(e), String(e))
+    assert_true(raised, "over-wide channel max must raise")
+
+    rig.channel.set_max_message_size(4)
+    var sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    raised = False
+    try:
+        rig.channel.send_request_bytes(
+            sid, Span(encode(EchoRequest(message="hello"))), last=True
+        )
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "oversized request must raise")
+    rig.channel.close()
+    rig.server_conn.close()
+
+    rig = make_e2e_rig()
+    rig.channel.set_max_message_size(1)
+    sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_request_bytes(
+        sid, Span(encode(EchoRequest())), last=True
+    )
+    rig.pump_until_reply()
+    raised = False
+    try:
+        _ = rig.channel.recv_response_bytes(sid)
+    except e:
+        raised = True
+        assert_true("exceeds max size" in String(e), String(e))
+    assert_true(raised, "oversized response must raise")
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def test_handler_size_wording_stays_unknown() raises:
     var server = Server("127.0.0.1", 0)
     server.register_unary[size_worded_handler]("/echo.Echo/Say")
@@ -758,6 +809,7 @@ def main() raises:
     test_frame_compressed_flag()
     test_recv_message_errors()
     test_server_max_message_size()
+    test_channel_max_message_size()
     test_handler_size_wording_stays_unknown()
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()
