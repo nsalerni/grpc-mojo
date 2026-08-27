@@ -657,7 +657,7 @@ def section_grpc_client(tmp: Path):
         m = re.search(r"took_ms=(\d+)", r.stdout)
         took_ms = int(m.group(1)) if m else None
         record("grpc", "client deadline enforced vs sleeping server (300ms -> DEADLINE_EXCEEDED)",
-               "code=4" in r.stdout and took_ms is not None and took_ms < 2000,
+               "code=4" in r.stdout and took_ms is not None and 50 <= took_ms < 2000,
                f"out={r.stdout.strip()!r}")
     finally:
         server.stop(0)

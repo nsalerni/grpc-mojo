@@ -168,22 +168,26 @@ def main() raises:
         external_call["_exit", NoneType](c_int(0))
 
     listener.close()
-    var channel = GrpcChannel.connect("127.0.0.1", port)
-    var small = encode(EchoRequest(message="hello bench"))
-    var big = encode(EchoRequest(message=String("x") * 65536))
+    try:
+        var channel = GrpcChannel.connect("127.0.0.1", port)
+        var small = encode(EchoRequest(message="hello bench"))
+        var big = encode(EchoRequest(message=String("x") * 65536))
 
-    _ = time_unary(channel, small, 2)
-    var unary_small = time_unary(channel, small, iters)
-    var unary_big = time_unary(channel, big, iters)
-    var bidi = time_bidi(channel, iters)
+        _ = time_unary(channel, small, 2)
+        var unary_small = time_unary(channel, small, iters)
+        var unary_big = time_unary(channel, big, iters)
+        var bidi = time_bidi(channel, iters)
 
-    print('{"impl":"grpc-mojo","iters":', iters, ",", sep="")
-    print_shape("unary_11b", unary_small, 1)
-    print(",")
-    print_shape("unary_64kib", unary_big, 1)
-    print(",")
-    print_shape("bidi_x20", bidi, 20)
-    print("}")
+        print('{"impl":"grpc-mojo","iters":', iters, ",", sep="")
+        print_shape("unary_11b", unary_small, 1)
+        print(",")
+        print_shape("unary_64kib", unary_big, 1)
+        print(",")
+        print_shape("bidi_x20", bidi, 20)
+        print("}")
 
-    channel.close()
+        channel.close()
+    except e:
+        _ = external_call["kill", c_int](pid, c_int(9))
+        raise e
     _ = external_call["kill", c_int](pid, c_int(9))

@@ -10,7 +10,8 @@
   and advertise it as SETTINGS_INITIAL_WINDOW_SIZE.
 - Added a published loopback comparison of grpc-mojo, grpcio, and tonic
   (unary 11B, unary 64KiB, bidi ping-pong ×20) with mean and p99. CI runs
-  `pixi run bench-compare-smoke` after the compliance suite.
+  `pixi run bench-compare-smoke` after the compliance suite. Tonic is
+  included when `cargo` and `protoc` are available.
   Do not git-diff the nanoseconds.
 - `GrpcChannel.connect_tls`, `Server.tls`, and `PollingServer.tls` take
   `StringSpan` for SNI and filesystem paths, matching `connect` / `unix`.

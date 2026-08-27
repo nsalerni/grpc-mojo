@@ -191,6 +191,7 @@ def bench_mojo(iters: int) -> dict[str, object]:
         check=True,
         capture_output=True,
         text=True,
+        timeout=1800,
     )
     return parse_json_object(completed.stdout + completed.stderr)
 

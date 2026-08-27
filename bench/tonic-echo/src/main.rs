@@ -142,14 +142,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut unary_small = Vec::with_capacity(iters);
     for _ in 0..iters {
+        let payload = small.clone();
         let start = Instant::now();
-        client.say(small.clone()).await?;
+        client.say(payload).await?;
         unary_small.push(start.elapsed().as_nanos());
     }
     let mut unary_big = Vec::with_capacity(iters);
     for _ in 0..iters {
+        let payload = big.clone();
         let start = Instant::now();
-        client.say(big.clone()).await?;
+        client.say(payload).await?;
         unary_big.push(start.elapsed().as_nanos());
     }
     let mut bidi = Vec::with_capacity(iters);
