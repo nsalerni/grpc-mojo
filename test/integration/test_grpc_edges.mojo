@@ -463,10 +463,7 @@ def test_channel_max_message_size() raises:
         Bool(rig.channel.conn.streams[sid].reset_code),
         "oversized send must RST_STREAM",
     )
-    rig.pump_until_reset(sid)
-    assert_equal(
-        rig.server_conn.streams[sid].reset_code.value(), ERR_CANCEL
-    )
+    assert_equal(rig.pump_until_reset(sid), ERR_CANCEL)
 
     rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
     sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
@@ -499,10 +496,7 @@ def test_channel_max_message_size() raises:
         Bool(rig.channel.conn.streams[sid].reset_code),
         "oversized recv must RST_STREAM",
     )
-    rig.pump_until_reset(sid)
-    assert_equal(
-        rig.server_conn.streams[sid].reset_code.value(), ERR_CANCEL
-    )
+    assert_equal(rig.pump_until_reset(sid), ERR_CANCEL)
 
     rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
     sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
@@ -712,11 +706,17 @@ struct E2ERig(Movable):
             if self.server.dispatch_ready(self.server_conn, self.handled) > 0:
                 return
 
-    def pump_until_reset(mut self, sid: UInt32) raises:
+    def pump_until_reset(mut self, sid: UInt32) raises -> UInt32:
         """Reads until the server records RST_STREAM on `sid`."""
         while True:
-            if Bool(self.server_conn.streams[sid].reset_code):
-                return
+            var known = False
+            for id in self.server_conn.stream_ids:
+                if id == sid:
+                    known = True
+            if known:
+                var code = self.server_conn.streams[sid].reset_code
+                if code:
+                    return code.value()
             self.server_conn.process_next_frame()
             _ = self.server.dispatch_ready(self.server_conn, self.handled)
 
