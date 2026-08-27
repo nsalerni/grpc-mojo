@@ -7,6 +7,7 @@ from grpc import PollingServer, PollingServerConfig, ServerContext
 from grpc.polling_server import (
     _PendingWrite,
     _can_move_http2_output,
+    _can_schedule_keepalive,
     _coalesce_poll_events,
     _keepalive_remaining_ns,
     _merge_poll_remaining,
@@ -267,6 +268,11 @@ def test_keepalive_poll_remaining() raises:
     assert_equal(_merge_poll_remaining(due, interval), due)
     assert_equal(_merge_poll_remaining(keepalive, skipped), keepalive)
     assert_equal(_merge_poll_remaining(due, skipped), due)
+
+    assert_true(_can_schedule_keepalive(0, 0, True))
+    assert_true(not _can_schedule_keepalive(1, 0, True))
+    assert_true(not _can_schedule_keepalive(0, 1, True))
+    assert_true(not _can_schedule_keepalive(0, 0, False))
 
 
 def main() raises:

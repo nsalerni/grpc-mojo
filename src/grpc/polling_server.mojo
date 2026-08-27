@@ -259,6 +259,17 @@ def _merge_poll_remaining(closest: Int64, remaining: Int64) -> Int64:
     return closest
 
 
+def _can_schedule_keepalive(
+    output_len: Int, pending_h2: Int, preface_complete: Bool
+) -> Bool:
+    """PINGs wait for preface and an empty output store.
+
+    An unsent socket suffix already has writable interest. A zero poll
+    timeout here would busy-spin the event loop until the peer drains.
+    """
+    return output_len == 0 and pending_h2 == 0 and preface_complete
+
+
 struct _PendingWrite(Movable, Sized):
     """Owned socket output plus the first unsent byte offset."""
 
@@ -1170,7 +1181,11 @@ struct PollingServer(Movable):
                 )
             if (
                 self.config.keepalive_interval_ns > 0
-                and connections[fd].h2.input_preface_complete()
+                and _can_schedule_keepalive(
+                    len(connections[fd].output),
+                    connections[fd].h2.pending_output_len(),
+                    connections[fd].h2.input_preface_complete(),
+                )
             ):
                 closest = _merge_poll_remaining(
                     closest,
