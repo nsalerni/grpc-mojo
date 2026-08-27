@@ -33,7 +33,7 @@ from grpc import (
     status_code_name,
 )
 from hpack import HeaderField
-from h2 import Http2Connection
+from h2 import ERR_CANCEL, Http2Connection
 from net import TCPListener, TCPStream
 from proto import decode, encode
 
@@ -463,7 +463,10 @@ def test_channel_max_message_size() raises:
         Bool(rig.channel.conn.streams[sid].reset_code),
         "oversized send must RST_STREAM",
     )
-    rig.pump_until_stream(sid)
+    rig.pump_until_reset(sid)
+    assert_equal(
+        rig.server_conn.streams[sid].reset_code.value(), ERR_CANCEL
+    )
 
     rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
     sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
@@ -496,7 +499,10 @@ def test_channel_max_message_size() raises:
         Bool(rig.channel.conn.streams[sid].reset_code),
         "oversized recv must RST_STREAM",
     )
-    rig.pump_until_stream(sid)
+    rig.pump_until_reset(sid)
+    assert_equal(
+        rig.server_conn.streams[sid].reset_code.value(), ERR_CANCEL
+    )
 
     rig.channel.set_max_message_size(DEFAULT_MAX_RECV_MESSAGE_SIZE)
     sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
@@ -706,11 +712,11 @@ struct E2ERig(Movable):
             if self.server.dispatch_ready(self.server_conn, self.handled) > 0:
                 return
 
-    def pump_until_stream(mut self, sid: UInt32) raises:
+    def pump_until_reset(mut self, sid: UInt32) raises:
+        """Reads until the server records RST_STREAM on `sid`."""
         while True:
-            for h in self.handled:
-                if h == sid:
-                    return
+            if Bool(self.server_conn.streams[sid].reset_code):
+                return
             self.server_conn.process_next_frame()
             _ = self.server.dispatch_ready(self.server_conn, self.handled)
 
