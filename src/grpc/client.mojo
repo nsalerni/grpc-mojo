@@ -246,6 +246,7 @@ struct GrpcChannel(Movable):
         self.conn.send_rst_stream(sid, ERR_CANCEL)
         self.conn._ensure_stream(sid)
         self.conn.streams[sid].reset_code = ERR_CANCEL
+        self._clear_deadline()
 
     def _reset_on_size_error(mut self, sid: UInt32):
         try:
@@ -471,6 +472,7 @@ struct GrpcChannel(Movable):
             trailing = Metadata.from_headers(
                 Span(self.conn.streams[sid].trailers)
             )
+        self._clear_deadline()
         return CallResult(
             status=status^,
             initial_metadata=initial^,
@@ -672,11 +674,11 @@ struct GrpcChannel(Movable):
 struct ServerStreamingCall[Resp: ProtoMessage](Movable):
     """Typed handle for one server-streaming RPC.
 
-    Holds an untracked pointer to the `GrpcChannel` that started the call.
-    Do not store it after the channel is closed or moved.
-
     Parameters:
         Resp: The response message type.
+
+    Holds an untracked pointer to the `GrpcChannel` that started the call.
+    Do not store it after the channel is closed or moved.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -769,7 +771,11 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
         return self._channel[].finish(self.sid)
 
     def cancel(mut self) raises:
-        """Cancels the call with RST_STREAM(CANCEL)."""
+        """Cancels the call with RST_STREAM(CANCEL).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
         self._recv_done = True
         self._channel[].cancel(self.sid)
 
@@ -777,12 +783,12 @@ struct ServerStreamingCall[Resp: ProtoMessage](Movable):
 struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Typed handle for one client-streaming RPC.
 
-    Holds an untracked pointer to the `GrpcChannel` that started the call.
-    Do not store it after the channel is closed or moved.
-
     Parameters:
         Req: The request message type.
         Resp: The response message type.
+
+    Holds an untracked pointer to the `GrpcChannel` that started the call.
+    Do not store it after the channel is closed or moved.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -874,7 +880,11 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         return msg.take()
 
     def cancel(mut self) raises:
-        """Cancels the call with RST_STREAM(CANCEL)."""
+        """Cancels the call with RST_STREAM(CANCEL).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
         self._send_closed = True
         self._channel[].cancel(self.sid)
 
@@ -882,15 +892,15 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
 struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
     """Typed handle for one bidirectional streaming RPC.
 
+    Parameters:
+        Req: The request message type.
+        Resp: The response message type.
+
     Recv-driven ping-pong works on one thread: `recv` pumps the connection
     until the next message. Full-duplex firehose needs threads, which Mojo
     1.0 does not expose. Holds an untracked pointer to the `GrpcChannel`
     that started the call; do not store it after the channel is closed or
     moved.
-
-    Parameters:
-        Req: The request message type.
-        Resp: The response message type.
     """
 
     var _channel: Pointer[GrpcChannel, MutUntrackedOrigin]
@@ -1002,7 +1012,11 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         return self._channel[].finish(self.sid)
 
     def cancel(mut self) raises:
-        """Cancels the call with RST_STREAM(CANCEL)."""
+        """Cancels the call with RST_STREAM(CANCEL).
+
+        Raises:
+            On connection I/O or HTTP/2 protocol errors.
+        """
         self._send_closed = True
         self._recv_done = True
         self._channel[].cancel(self.sid)

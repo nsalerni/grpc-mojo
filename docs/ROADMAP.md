@@ -81,18 +81,14 @@ exist — documented, not silent.
 
 *Depends on: nothing. Unblocks: B2 completion, real-world usefulness.*
 
-### A2. Deadline enforcement + cancellation *(M)*
-We propagate `grpc-timeout` correctly but nobody acts on it.
-
-1. `net`: add `set_read_timeout(ns)` / `set_write_timeout(ns)` via
-   `SO_RCVTIMEO`/`SO_SNDTIMEO`; map `EAGAIN` to a typed timeout error.
-   (This lands in mojo-net → C1.)
-2. Client: arm the socket timeout from the call deadline; on expiry send
-   `RST_STREAM(CANCEL)` and surface `DEADLINE_EXCEEDED`. Add
-   `cancel(call)` for user-initiated cancellation.
-3. Server: check the decoded deadline before invoking and after returning;
-   respond `DEADLINE_EXCEEDED` when blown; observe client RST_STREAM as
-   cancellation.
+### A2. Deadline enforcement + cancellation *(done)*
+Shipped. `net` maps socket timeouts to a typed error. Clients arm
+`SO_RCVTIMEO` from `grpc-timeout`, send `RST_STREAM(CANCEL)` on expiry,
+and surface `DEADLINE_EXCEEDED`. Servers check the decoded deadline
+before and after the handler and treat a client RST_STREAM as
+cancellation. `GrpcChannel.finish` and `cancel` clear the socket
+timeout so a later call on the same channel is not bound by the
+previous deadline.
 
 ### A3. Robustness against malformed and malicious peers *(M)*
 - **Recursion-depth limit in the proto decoder** (default 100, like
