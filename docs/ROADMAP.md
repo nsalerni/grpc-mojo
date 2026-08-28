@@ -52,6 +52,8 @@ is the live list.
 - Publishing conda packages to modular-community needs tokens and a
   human publish step.
 - Protecting `main` with a branch ruleset is a GitHub org setting.
+- GitHub About fields (description, homepage, topics) are repository
+  settings, not files in the tree.
 
 ---
 
@@ -77,30 +79,18 @@ cancellation. `GrpcChannel.finish` and `cancel` clear the socket
 timeout so a later call on the same channel is not bound by the
 previous deadline.
 
-### A3. Robustness against malformed and malicious peers *(M)*
-- **Recursion-depth limit in the proto decoder** (default 100, like
-  reference implementations) — the one item that is a bug today: deeply
-  nested input can blow the stack. *Do first.*
-- Bound per-stream buffering: stop auto-replenishing flow-control windows
-  when the application isn't consuming (backpressure instead of unbounded
-  memory).
-- HTTP/2 abuse guards: rapid-reset (CVE-2023-44487) accounting,
-  PING/SETTINGS flood limits, `MAX_CONCURRENT_STREAMS` enforcement,
-  header-list-size limit (8 KiB default per spec) → `ENHANCE_YOUR_CALM` /
-  GOAWAY.
-- Unknown-field **preservation** (not just skipping): store raw unknown
-  bytes on messages and re-emit on encode, per proto3 spec; required for
-  any proxy-shaped use.
+### A3. Robustness against malformed and malicious peers *(done)*
+Shipped. The proto decoder caps nesting at 100, matching reference
+implementations. Unknown fields are stored and re-emitted on encode.
+mojo-http2 applies rapid-reset, PING/SETTINGS flood, concurrent-stream,
+and header-list-size limits with `ENHANCE_YOUR_CALM`. Stream receive
+windows replenish when the application consumes bytes via `take_data`;
+the connection window still replenishes when DATA arrives.
 
-### A4. Codegen semantics *(M)*
-- **Cross-file `.proto` imports** — one generated module per file,
-  Mojo imports mirroring proto imports; unblocks well-known types
-  (`Timestamp`, `Duration`, …), then ships helpers for them.
-- proto3 `optional` → real presence via `Optional[T]` fields.
-- Typed enums (struct wrapper with `Equatable`, name lookup) instead of
-  bare `Int32` — shipped; generated stubs use protomojo 0.4.0 wrappers.
-- Server-side registration codegen: `register_echo_service[handlers...]`
-  companion to the client stub.
+### A4. Codegen semantics *(done)*
+Shipped. One generated module per `.proto` file, proto3 `optional` as
+`Optional[T]`, typed enum wrappers (protomojo 0.4.0), and
+`add_<service>_service[...]` server registration next to the client stub.
 
 ### A5. Protocol niceties *(S–M)*
 Shipped: `grpc-status-details-bin` on client extract and server send; max
@@ -118,31 +108,21 @@ Still open, and blocked as listed above: graceful GOAWAY drain on
 The compliance suite is ours; these are the suites the rest of the world
 recognizes. "100% compatible" is claimable when B1–B4 are green.
 
-### B1. GitHub remote + CI *(S, do first)*
-Push the repo; GitHub Actions matrix `{macos-14, ubuntu-24.04}` running
-`pixi run test` and `pixi run compliance` with pixi caching. **Linux has
-never executed** — the sockaddr/errno paths are written but unproven;
-expect a short fix cycle. Badge the compliance score from the generated
-report.
+### B1. GitHub remote + CI *(done)*
+CI runs `pixi run test` and `pixi run compliance` on `{macos-14,
+ubuntu-24.04}` with pixi caching. The compliance report is generated and
+badged from that run.
 
-### B2. Official gRPC interop test suite *(M)*
-Implement the canonical named cases (`empty_unary`, `large_unary`,
-`custom_metadata`, `status_code_and_message`, `special_status_message`,
-`unimplemented_method`, then the streaming set with A1) as
-`interop_client.mojo` / `interop_server.mojo`, run against grpcio in CI:
-`pixi run interop-official`.
+### B2. Official gRPC interop test suite *(done)*
+The 12 canonical cases run in both roles over h2c, TLS, and Unix sockets
+against grpcio (`pixi run interop-official`): 72/72.
 
-### B3. h2spec *(S)*
-Run [h2spec](https://github.com/summerwind/h2spec) (strict RFC 9113
-conformance tool) against our server in CI. Will find strictness gaps our
-happy-path hyper-h2 test can't (pseudo-header validation, stream-id
-monotonicity, required error codes); feed fixes back into `h2`.
+### B3. h2spec *(done)*
+[h2spec](https://github.com/summerwind/h2spec) is green: 146/146.
 
-### B4. protobuf conformance runner *(M)*
-Wire `proto` + codegen into Google's official
-`conformance_test_runner` via a small Mojo conformance binary. The gold
-standard for the wire format; supersedes our randomized differential as
-the outer gate (keep ours — it runs in seconds).
+### B4. protobuf conformance runner *(done)*
+Google's `conformance_test_runner` is green for proto3 binary and JSON:
+1476/1476. proto2 cases are skipped on purpose.
 
 ### B5. Fuzzing + benchmarks *(done)*
 Broader HTTP/2 framing and HPACK random cases live in mojo-http2.
@@ -167,7 +147,7 @@ and a mojo-threads RFC before any thread package.
 | Package | Repository | Remaining | Community value |
 |---|---|---|---|
 | **protomojo** (+ `protoc-gen-mojo`) | [protomojo](https://github.com/nsalerni/protomojo) | proto2, editions, and text format out of scope | Protobuf for Mojo — useful far beyond gRPC. Flagship. |
-| **mojo-http2** (`hpack` + `h2`) | [mojo-http2](https://github.com/nsalerni/mojo-http2) | HTTP/2 flood guards | HPACK and HTTP/2 for Mojo servers/clients generally |
+| **mojo-http2** (`hpack` + `h2`) | [mojo-http2](https://github.com/nsalerni/mojo-http2) | RFC 9218 stream priority if a consumer needs it | HPACK and HTTP/2 for Mojo servers/clients generally |
 | **mojo-net** | [mojo-net](https://github.com/nsalerni/mojo-net) | none for the current socket/DNS/poller scope | Ends per-project libc socket bindings |
 | **mojo-tls** | [mojo-tls](https://github.com/nsalerni/mojo-tls) | TLS session resumption | TLS 1.2/1.3 with strict X.509, SNI, and ALPN |
 | **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | 1.0-compatible retarget, then gRPC gzip | Enables pending `grpc-encoding: gzip` |
@@ -215,9 +195,9 @@ Ordered by leverage-per-effort:
 
 | Phase | Items | Exit criteria | Status |
 |---|---|---|---|
-| **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · bug report / PRs / extraction pending |
-| **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming (including typed client call objects) · ✅ deadlines/cancel · ✅ interop 72/72 across h2c, TLS, and Unix sockets · ✅ h2spec 146/146 · flood guards pending |
-| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields, typed enums); ✅ conformance 1476/1476 for proto3 binary and JSON; gzip blocked on a 1.0-compatible zlib package |
+| **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · packages extracted ✅ · bug report / stdlib PRs / conda publish pending |
+| **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming (including typed client call objects) · ✅ deadlines/cancel · ✅ interop 72/72 across h2c, TLS, and Unix sockets · ✅ h2spec 146/146 · ✅ flood guards, unknown-field preservation, and proto depth limit |
+| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields, typed enums, service registration); ✅ conformance 1476/1476 for proto3 binary and JSON; gzip blocked on a 1.0-compatible zlib package |
 | **4. Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | TLS interop ✅ · bounded unary h2c and TLS polling ✅ · A5 max-message + PollingServer keepalive ✅ · B5 published loopback benches vs grpcio/tonic ✅ · parallel handlers, GOAWAY drain, and blocking-server keepalive blocked on Mojo threads/async |
 
 **Definition of "100% compatible", concretely:** official gRPC interop
