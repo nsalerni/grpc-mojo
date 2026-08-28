@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
+  verification) as done. Known-gap text no longer claims that
+  `initial_window_size` is missing.
 - Rewrote README, contributor, and packaging docs for the current
   five-repository layout.
 - `Metadata.add` and `add_binary` take `StringSpan` for keys and ASCII

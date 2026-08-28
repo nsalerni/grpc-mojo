@@ -2117,9 +2117,9 @@ def write_html_report():
 
     h.append('<section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>')
     gaps = [
-
-        ("Compression", "mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Compressed messages are rejected, never mis-decoded."),
+        ("Compression", "mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Published mojo-zlib depends on nightly Mojo, not 1.0. Compressed messages are rejected, never mis-decoded."),
         ("Concurrency", "PollingServer overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized. Streaming RPCs use the blocking server (PRIMITIVES.md #7)."),
+        ("Control plane", "Graceful GOAWAY drain on PollingServer.stop() and keepalive PINGs on the blocking Server wait on Mojo threads or a public async runtime. Configurable HTTP/2 initial_window_size already ships."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
     ]
     for k, v in gaps:
@@ -2177,9 +2177,9 @@ def write_report():
         "",
         "## Known gaps (tracked, not silent)",
         "",
-
-        "- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Compressed messages are rejected, not mis-decoded.",
+        "- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Published `mojo-zlib` depends on nightly Mojo, not 1.0. Compressed messages are rejected, not mis-decoded.",
         "- **Concurrency**: `PollingServer` overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). Streaming RPCs remain on the blocking server.",
+        "- **Control plane**: graceful GOAWAY drain on `PollingServer.stop()` and keepalive PINGs on the blocking `Server` wait on Mojo threads or a public async runtime. Configurable HTTP/2 `initial_window_size` already ships.",
         "",
     ]
     REPORT.write_text("\n".join(lines))
