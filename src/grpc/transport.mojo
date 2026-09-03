@@ -233,6 +233,23 @@ struct GrpcTransport(ReadinessStream):
             return
         self._tcp.value().set_read_timeout(nanos)
 
+    def set_write_timeout(self, nanos: Int64) raises:
+        """Sets the active stream's write timeout.
+
+        Args:
+            nanos: Timeout in nanoseconds; 0 clears it.
+
+        Raises:
+            If the transport cannot apply the timeout.
+        """
+        if self._tls:
+            self._tls.value().set_write_timeout(nanos)
+            return
+        if self._unix:
+            self._unix.value().set_write_timeout(nanos)
+            return
+        self._tcp.value().set_write_timeout(nanos)
+
     def set_nodelay(self, enabled: Bool) raises:
         """Applies the no-delay latency hint to the active stream.
 

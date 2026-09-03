@@ -94,6 +94,9 @@ struct ServerContext(Movable):
     var abort_status: Optional[Status]
     """Set by a handler to end the call with a specific non-OK status
     (the equivalent of grpcio's context.abort)."""
+    var stop_server: Bool
+    """When True after a PollingServer handler returns, `serve()` begins
+    graceful shutdown. Ignored by the blocking `Server`."""
 
     def __init__(out self, peer_certificate: Optional[PeerCertificate] = None):
         """Constructs an empty context; dispatch fills the request fields.
@@ -111,6 +114,7 @@ struct ServerContext(Movable):
         self.response_metadata = Metadata()
         self.response_trailers = Metadata()
         self.abort_status = None
+        self.stop_server = False
 
     def abort(mut self, code: Int, var message: String):
         """Ends the call with a specific status once the handler returns.
@@ -140,6 +144,16 @@ struct ServerContext(Movable):
         var st = Status(code=code, message=message^)
         st.details_bin = List[Byte](details)
         self.abort_status = st^
+
+    def request_stop(mut self):
+        """Asks a running `PollingServer.serve` to drain and return.
+
+        Same-thread: the event loop notices after this handler returns.
+        SIGTERM/SIGINT use a self-pipe to wake `Poller.wait`. There is no
+        cross-thread stop API; Mojo 1.0 has no threads. The blocking
+        `Server` ignores this flag.
+        """
+        self.stop_server = True
 
 
 @fieldwise_init

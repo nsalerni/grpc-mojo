@@ -13,11 +13,13 @@
 `PollingServer` is an opt-in alternative to the blocking `Server`. It uses
 `mojo-net`'s kqueue/epoll `Poller` so one thread can make progress on many
 connections. Handler functions still run serially and must return
-promptly. Streaming RPCs and graceful shutdown remain on the blocking
-server path, or on later PollingServer methods. TLS handshakes advance
-through the same Poller and strictly require the `h2` ALPN token. Unix
-sockets are plaintext only. Optional HTTP/2 keepalive PINGs are driven
-from the Poller loop when `keepalive_interval_ns` is positive.
+promptly. Streaming RPCs remain on the blocking server until the polling
+path grows matching `register_*` methods. `request_stop()` and optional
+SIGTERM/SIGINT handlers send GOAWAY and drain live streams on this thread.
+TLS handshakes advance through the same Poller and strictly require the
+`h2` ALPN token. Unix sockets are plaintext only. Optional HTTP/2
+keepalive PINGs are driven from the Poller loop when
+`keepalive_interval_ns` is positive.
 
 Every connection has one active RPC stream and explicit inactivity, request,
 read, frame, write, message, and output limits. The HTTP/2 output queue and
@@ -33,12 +35,19 @@ OpenSSL steps per Poller turn. OpenSSL's per-session allocations are outside
 the plaintext HTTP/2 and gRPC byte limits.
 """
 
-from std.ffi import c_int
+from std.ffi import OwnedDLHandle, c_int
 from std.time import monotonic
 
 from hpack import HeaderField
 from h2 import DEFAULT_WINDOW_SIZE, H2_ALPN, Http2Connection, get_u32_be
-from net import PollEvent, Poller, TCPListener, UnixListener, is_would_block
+from net import (
+    PollEvent,
+    Poller,
+    TCPListener,
+    UnixListener,
+    Wakeup,
+    is_would_block,
+)
 from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
 
@@ -47,6 +56,7 @@ from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
 from .server import ServerContext, UnaryBytesHandler
 from .status import Status, StatusCode, percent_encode_message
+from .stop_signals import install_wakeup_signal_handlers
 from .timeout import decode_timeout
 from .transport import GrpcTransport
 
@@ -87,6 +97,8 @@ struct PollingServerConfig(Copyable, Movable):
     """Maximum time allowed for a TLS handshake."""
     var keepalive_interval_ns: Int64
     """Idle nanoseconds before an HTTP/2 keepalive PING; 0 disables PINGs."""
+    var shutdown_drain_timeout_ms: Int
+    """Maximum time after GOAWAY to wait for live streams to finish."""
 
     def __init__(
         out self,
@@ -105,6 +117,7 @@ struct PollingServerConfig(Copyable, Movable):
         incomplete_request_timeout_ms: Int = 30_000,
         tls_handshake_timeout_ms: Int = 10_000,
         keepalive_interval_ns: Int64 = 0,
+        shutdown_drain_timeout_ms: Int = 10_000,
     ):
         """Constructs a limit set, using safe bounded defaults.
 
@@ -134,6 +147,10 @@ struct PollingServerConfig(Copyable, Movable):
                 disables keepalive. PINGs are caller-driven from the Poller
                 loop; there is no internal timer. The poll timeout uses
                 time remaining since last activity, not the full interval.
+            shutdown_drain_timeout_ms: After `request_stop` or a stop
+                signal, maximum milliseconds to wait for accepted
+                connections and TLS handshakes to close before forcing
+                the remaining sockets shut.
         """
         self.max_connections = max_connections
         self.max_accepts_per_event = max_accepts_per_event
@@ -149,6 +166,7 @@ struct PollingServerConfig(Copyable, Movable):
         self.incomplete_request_timeout_ms = incomplete_request_timeout_ms
         self.tls_handshake_timeout_ms = tls_handshake_timeout_ms
         self.keepalive_interval_ns = keepalive_interval_ns
+        self.shutdown_drain_timeout_ms = shutdown_drain_timeout_ms
 
     def validate(self) raises:
         """Rejects limits that cannot make safe forward progress.
@@ -194,12 +212,15 @@ struct PollingServerConfig(Copyable, Movable):
             raise Error("grpc: tls_handshake_timeout_ms must be positive")
         if self.keepalive_interval_ns < 0:
             raise Error("grpc: keepalive_interval_ns must be non-negative")
+        if self.shutdown_drain_timeout_ms <= 0:
+            raise Error("grpc: shutdown_drain_timeout_ms must be positive")
         # Poller forwards milliseconds to epoll_wait/kqueue through c_int.
         var max_timeout_ms = 0x7FFFFFFF
         if (
             self.idle_timeout_ms > max_timeout_ms
             or self.incomplete_request_timeout_ms > max_timeout_ms
             or self.tls_handshake_timeout_ms > max_timeout_ms
+            or self.shutdown_drain_timeout_ms > max_timeout_ms
         ):
             raise Error("grpc: timeout exceeds Poller millisecond range")
         if self.keepalive_interval_ns > Int64(max_timeout_ms) * 1_000_000:
@@ -548,7 +569,8 @@ struct PollingServer(Movable):
     non-blocking TLS handshakes and requires `h2` ALPN; `unix` binds a
     Unix domain socket. Use `Server` for streaming RPCs. Set
     `config.keepalive_interval_ns` to send HTTP/2 keepalive PINGs from the
-    event loop; the default of 0 sends none.
+    event loop; the default of 0 sends none. `request_stop()` or a stop
+    signal sends GOAWAY and returns after live streams drain.
     """
 
     var host: String
@@ -567,6 +589,14 @@ struct PollingServer(Movable):
     """Whether a Unix listener may remove an existing socket file."""
     var health: Optional[Health]
     """Health registry for Check; None leaves the method UNIMPLEMENTED."""
+    var _stop_requested: Bool
+    """True once `request_stop` or a stop signal has been observed."""
+    var _wakeup: Optional[Wakeup]
+    """Self-pipe used to wake `Poller.wait`; created on first use."""
+    var _shutdown_deadline_ns: Int64
+    """Monotonic deadline for GOAWAY drain; 0 means shutdown has not begun."""
+    var _stop_shim: List[OwnedDLHandle]
+    """Keeps the SIGTERM/SIGINT handler mapped after install."""
 
     def __init__(
         out self,
@@ -593,6 +623,10 @@ struct PollingServer(Movable):
         self._unix_path = None
         self._unix_remove_existing = False
         self.health = None
+        self._stop_requested = False
+        self._wakeup = None
+        self._shutdown_deadline_ns = 0
+        self._stop_shim = List[OwnedDLHandle]()
 
     @staticmethod
     def tls(
@@ -740,6 +774,38 @@ struct PollingServer(Movable):
             registry: Serving-status map. The empty name defaults to SERVING.
         """
         self.health = registry^
+
+    def request_stop(mut self) raises:
+        """Asks `serve()` to send GOAWAY, drain live streams, and return.
+
+        Safe to call from a handler on the event-loop thread. A self-pipe
+        wakes `Poller.wait` so SIGTERM/SIGINT can stop the loop. This is
+        not a cross-thread API.
+
+        Raises:
+            If the wakeup pipe cannot be created.
+        """
+        self._stop_requested = True
+        self._ensure_wakeup()
+        self._wakeup.value().notify()
+
+    def install_stop_signals(mut self) raises:
+        """Writes the wakeup pipe from SIGTERM and SIGINT.
+
+        The C handler calls only `write(2)`. Install before `serve()`.
+        Not safe to drive from another Mojo thread.
+
+        Raises:
+            If the wakeup pipe or `sigaction` installer fails.
+        """
+        self._ensure_wakeup()
+        self._stop_shim.append(
+            install_wakeup_signal_handlers(self._wakeup.value().write_fd)
+        )
+
+    def _ensure_wakeup(mut self) raises:
+        if not self._wakeup:
+            self._wakeup = Wakeup()
 
     def _set_request_error(
         self, mut connection: _PollingConnection, status: Status
@@ -924,6 +990,8 @@ struct PollingServer(Movable):
             else:
                 var handler = self.routes[connection.ctx.path].handler
                 payload = handler(connection.request^, connection.ctx)
+                if connection.ctx.stop_server:
+                    self._stop_requested = True
                 if connection.ctx.abort_status:
                     connection.response_status = (
                         connection.ctx.abort_status.value().copy()
@@ -937,10 +1005,12 @@ struct PollingServer(Movable):
             else:
                 connection.response = frame_message(Span(payload))
                 connection.response_status = Status.ok()
-        except error:
+        except:
             connection.response_status = Status(
                 code=StatusCode.UNKNOWN, message=String("handler failed")
             )
+        if connection.ctx.stop_server:
+            self._stop_requested = True
 
     def _queue_http_415(self, mut connection: _PollingConnection) raises:
         var headers = [HeaderField(name=String(":status"), value=String("415"))]
@@ -1296,11 +1366,49 @@ struct PollingServer(Movable):
                 return True
         return False
 
-    def serve(mut self) raises:
-        """Runs the h2c, TLS, or Unix event loop forever.
+    def _drain_complete(
+        self,
+        connections: Dict[c_int, _PollingConnection],
+        fds: List[c_int],
+        handshakes: Dict[c_int, _PollingHandshake],
+    ) -> Bool:
+        if len(handshakes) != 0:
+            return False
+        for fd in fds:
+            if fd in connections:
+                return False
+        return True
 
-        The bound address is printed after the listener is registered. The
-        method does not return during normal operation.
+    def _begin_goaway_drain(
+        mut self,
+        mut connections: Dict[c_int, _PollingConnection],
+        fds: List[c_int],
+        mut poller: Poller,
+    ) raises:
+        if self._shutdown_deadline_ns != 0:
+            return
+        self._shutdown_deadline_ns = Int64(monotonic()) + (
+            Int64(self.config.shutdown_drain_timeout_ms) * 1_000_000
+        )
+        for fd in fds:
+            if fd not in connections:
+                continue
+            var connection = connections.pop(fd)
+            try:
+                connection.h2.begin_graceful_shutdown()
+                _ = self._move_http2_output(connection)
+                self._update_connection_interest(poller, fd, connection)
+            except:
+                pass
+            connections[fd] = connection^
+
+    def serve(mut self) raises:
+        """Runs the h2c, TLS, or Unix event loop until stop or a fatal error.
+
+        The bound address is printed after the listener is registered.
+        `request_stop()` or SIGTERM/SIGINT (after `install_stop_signals`)
+        send GOAWAY and return once live streams drain or the drain
+        deadline expires. There is no cross-thread stop API.
 
         Raises:
             If listener setup, polling, socket I/O, or protocol processing
@@ -1333,21 +1441,48 @@ struct PollingServer(Movable):
                 sep="",
             )
             tcp_listener = tcp^
+        self._ensure_wakeup()
+        var wakeup_fd = self._wakeup.value().descriptor()
         var poller = Poller()
         poller.register(listener_fd, readable=True, writable=False)
+        poller.register(wakeup_fd, readable=True, writable=False)
         var listener_registered = True
         var connections = Dict[c_int, _PollingConnection]()
         var handshakes = Dict[c_int, _PollingHandshake]()
         var fds = List[c_int]()
 
         while True:
-            var events = _coalesce_poll_events(
-                Span(
-                    poller.wait(
-                        self._poll_timeout_ms(connections, handshakes, fds)
-                    )
-                )
-            )
+            if self._stop_requested:
+                if listener_registered:
+                    poller.unregister(listener_fd)
+                    listener_registered = False
+                self._begin_goaway_drain(connections, fds, poller)
+                var drained = self._drain_complete(connections, fds, handshakes)
+                var expired = Int64(monotonic()) >= self._shutdown_deadline_ns
+                if drained or expired:
+                    var leftover = List[c_int](capacity=len(fds))
+                    for fd in fds:
+                        leftover.append(fd)
+                    for fd in leftover:
+                        if fd in handshakes:
+                            _ = handshakes.pop(fd)
+                        if fd in connections:
+                            var connection = connections.pop(fd)
+                            connection.h2.close()
+                        self._remove_fd(fds, fd)
+                    poller.unregister(wakeup_fd)
+                    self._wakeup.value().close()
+                    return
+
+            var timeout_ms = self._poll_timeout_ms(connections, handshakes, fds)
+            if self._shutdown_deadline_ns > 0:
+                var remain_ns = self._shutdown_deadline_ns - Int64(monotonic())
+                var remain_ms = 0
+                if remain_ns > 0:
+                    remain_ms = Int((remain_ns + 999_999) // 1_000_000)
+                if timeout_ms < 0 or remain_ms < timeout_ms:
+                    timeout_ms = remain_ms
+            var events = _coalesce_poll_events(Span(poller.wait(timeout_ms)))
             var accept_ready = False
             var close_fds = List[c_int]()
             var closing = Dict[c_int, _PollingConnection]()
@@ -1358,8 +1493,16 @@ struct PollingServer(Movable):
             # This prevents a stale duplicate kqueue event from reaching a
             # newly accepted connection that reused the same descriptor.
             for event in events:
+                if event.fd == wakeup_fd:
+                    try:
+                        self._wakeup.value().drain()
+                    except:
+                        pass
+                    self._stop_requested = True
+                    continue
                 if event.fd == listener_fd:
-                    accept_ready |= event.readable
+                    if not self._stop_requested:
+                        accept_ready |= event.readable
                     continue
                 if event.fd in handshakes:
                     if (
@@ -1579,6 +1722,7 @@ struct PollingServer(Movable):
 
             if (
                 not listener_registered
+                and not self._stop_requested
                 and len(fds) < self.config.max_connections
                 and (
                     not self._tls_context
@@ -1588,7 +1732,11 @@ struct PollingServer(Movable):
                 poller.register(listener_fd, readable=True, writable=False)
                 listener_registered = True
 
-            if accept_ready and listener_registered:
+            if (
+                accept_ready
+                and listener_registered
+                and not self._stop_requested
+            ):
                 var accepts = 0
                 while (
                     len(fds) < self.config.max_connections
@@ -1697,3 +1845,25 @@ struct PollingServer(Movable):
                 ):
                     poller.unregister(listener_fd)
                     listener_registered = False
+
+            if self._stop_requested:
+                if listener_registered:
+                    poller.unregister(listener_fd)
+                    listener_registered = False
+                self._begin_goaway_drain(connections, fds, poller)
+                var drained = self._drain_complete(connections, fds, handshakes)
+                var expired = Int64(monotonic()) >= self._shutdown_deadline_ns
+                if drained or expired:
+                    var leftover = List[c_int](capacity=len(fds))
+                    for fd in fds:
+                        leftover.append(fd)
+                    for fd in leftover:
+                        if fd in handshakes:
+                            _ = handshakes.pop(fd)
+                        if fd in connections:
+                            var connection = connections.pop(fd)
+                            connection.h2.close()
+                        self._remove_fd(fds, fd)
+                    poller.unregister(wakeup_fd)
+                    self._wakeup.value().close()
+                    return
