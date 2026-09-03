@@ -17,10 +17,10 @@ RATTLER_INDEX = "rattler-index>=0.30,<0.31"
 BUILD_TIMEOUT_SECONDS = 30 * 60
 TEST_TIMEOUT_SECONDS = 5 * 60
 DEPENDENCIES = [
-    ("mojo-net", "0.2.4", PACKAGES / "mojo-net"),
-    ("protomojo", "0.4.0", PACKAGES / "protomojo"),
-    ("mojo-tls", "0.3.0", PACKAGES / "mojo-tls"),
-    ("mojo-http2", "0.2.7", PACKAGES / "mojo-http2"),
+    ("mojo-net", "0.2.6", PACKAGES / "mojo-net"),
+    ("protomojo", "0.4.2", PACKAGES / "protomojo"),
+    ("mojo-tls", "0.3.2", PACKAGES / "mojo-tls"),
+    ("mojo-http2", "0.2.8", PACKAGES / "mojo-http2"),
 ]
 
 

@@ -25,6 +25,7 @@ from grpc import (
     BidiStreamingCall,
     ClientStreamingCall,
     GrpcChannel,
+    PollingServer,
     Server,
     ServerCall,
     ServerContext,
@@ -356,6 +357,29 @@ def add_echo_service[
 
     Args:
         server: The server to register the handlers on.
+    """
+    server.register_unary[say](ECHO_SAY_PATH)
+    server.register_server_streaming[split](ECHO_SPLIT_PATH)
+    server.register_client_streaming[join](ECHO_JOIN_PATH)
+    server.register_bidi[chat](ECHO_CHAT_PATH)
+
+
+def add_echo_polling_service[
+    say: def (EchoRequest, mut ServerContext) raises thin -> EchoResponse,
+    split: def (EchoRequest, mut ServerContext, mut ServerCall) raises thin -> None,
+    join: def (mut ServerContext, mut ServerCall) raises thin -> EchoResponse,
+    chat: def (mut ServerContext, mut ServerCall) raises thin -> None,
+](mut server: PollingServer) raises:
+    """Registers `echo.Echo` handlers on a PollingServer.
+
+    Parameters:
+        say: Handler for the `Say` method.
+        split: Handler for the `Split` method.
+        join: Handler for the `Join` method.
+        chat: Handler for the `Chat` method.
+
+    Args:
+        server: The polling server to register the handlers on.
     """
     server.register_unary[say](ECHO_SAY_PATH)
     server.register_server_streaming[split](ECHO_SPLIT_PATH)

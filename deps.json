@@ -2,16 +2,16 @@
   "dir": "packages",
   "deps": {
     "mojo-net": {
-      "ref": "v0.2.4"
+      "ref": "cursor/wakeup-pipe-21d9"
     },
     "protomojo": {
-      "ref": "v0.4.0"
+      "ref": "cursor/polling-service-codegen-21d9"
     },
     "mojo-http2": {
-      "ref": "v0.2.7"
+      "ref": "cursor/h2-connection-limits-21d9"
     },
     "mojo-tls": {
-      "ref": "v0.3.0"
+      "ref": "cursor/tls-write-timeout-21d9"
     }
   }
 }

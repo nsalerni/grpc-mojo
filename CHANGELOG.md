@@ -19,6 +19,10 @@
   `register_client_streaming`, `register_bidi`, and `*_bytes`). Handlers
   switch the connection to blocking `ServerCall` I/O on the event-loop
   thread and stall other connections until they return. Version is 0.2.6.
+- Regenerated `echo_pb.mojo` with `add_echo_polling_service`. Source
+  `deps.json` pins mojo-net 0.2.6 (`Wakeup`), mojo-http2 0.2.8, mojo-tls
+  0.3.2, and protomojo 0.4.2. Until those tags exist, the refs track the
+  stacked release branches. Conda ranges require the same lower bounds.
 
 - Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
   verification) as done. Known-gap text no longer claims that
