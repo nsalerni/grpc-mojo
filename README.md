@@ -79,15 +79,16 @@ Unix sockets and mTLS are documented in [src/grpc/README.md](src/grpc/README.md)
 - Deadlines, cancellation, ASCII and binary (`-bin`) metadata
 - `protoc-gen-mojo` message types and client/server stubs
 - h2c, TLS (`h2` ALPN), and Unix domain sockets
-- Optional `PollingServer` for many unary h2c, TLS, or Unix connections
-  on one thread, with `request_stop()` GOAWAY drain
+- Optional `PollingServer` for many h2c, TLS, or Unix connections on one
+  thread, including streaming RPCs and `request_stop()` GOAWAY drain
 - `grpc.health.v1` Check (`Watch` returns UNIMPLEMENTED)
 
 ## Current limits
 
 - Blocking `Server` handles one connection at a time; `PollingServer` overlaps
-  I/O but still runs handlers serially
-- Streaming RPCs use the blocking server; bidi is receive-driven
+  I/O but still runs handlers serially. Streaming handlers on
+  `PollingServer` block the poll thread for the duration of the call
+- Bidi is receive-driven ping-pong; there is no concurrent send+recv firehose
 - No compression codecs yet
 - TLS uses one certificate chain; SNI-based selection is not supported
 

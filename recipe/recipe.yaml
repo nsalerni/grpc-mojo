@@ -1,5 +1,5 @@
 context:
-  version: "0.2.5"
+  version: "0.2.6"
   mojo_version: ">=1.0.0,<1.1.0"
   family_version: ">=0.2.0,<0.3.0"
   protomojo_version: ">=0.4.0,<0.5.0"

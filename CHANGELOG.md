@@ -15,6 +15,10 @@
   drain live streams on the event-loop thread. This is not a cross-thread
   API. Requires mojo-net 0.2.6 (`Wakeup`) and mojo-tls 0.3.2
   (`TLSStream.set_write_timeout`). Version is 0.2.5.
+- Added `PollingServer` streaming (`register_server_streaming`,
+  `register_client_streaming`, `register_bidi`, and `*_bytes`). Handlers
+  switch the connection to blocking `ServerCall` I/O on the event-loop
+  thread and stall other connections until they return. Version is 0.2.6.
 
 - Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
   verification) as done. Known-gap text no longer claims that

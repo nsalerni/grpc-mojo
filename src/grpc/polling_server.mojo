@@ -8,13 +8,16 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""A bounded readiness-driven server for unary h2c, TLS, or Unix RPCs.
+"""A bounded readiness-driven server for h2c, TLS, or Unix RPCs.
 
 `PollingServer` is an opt-in alternative to the blocking `Server`. It uses
 `mojo-net`'s kqueue/epoll `Poller` so one thread can make progress on many
-connections. Handler functions still run serially and must return
-promptly. Streaming RPCs remain on the blocking server until the polling
-path grows matching `register_*` methods. `request_stop()` and optional
+connections. Handler functions still run serially on the event-loop
+thread. Unary handlers should return promptly. Streaming handlers run to
+completion through a temporary blocking `ServerCall` and stall other
+connections while they run — the same contract as unary handlers and as
+the blocking `Server`. Long-lived streams belong on process-per-connection
+`Server` until Mojo ships threads or async. `request_stop()` and optional
 SIGTERM/SIGINT handlers send GOAWAY and drain live streams on this thread.
 TLS handshakes advance through the same Poller and strictly require the
 `h2` ALPN token. Unix sockets are plaintext only. Optional HTTP/2
@@ -39,7 +42,13 @@ from std.ffi import OwnedDLHandle, c_int
 from std.time import monotonic
 
 from hpack import HeaderField
-from h2 import DEFAULT_WINDOW_SIZE, H2_ALPN, Http2Connection, get_u32_be
+from h2 import (
+    DEFAULT_WINDOW_SIZE,
+    ERR_CANCEL,
+    H2_ALPN,
+    Http2Connection,
+    get_u32_be,
+)
 from net import (
     PollEvent,
     Poller,
@@ -54,7 +63,14 @@ from tls import PeerCertificate, TLSContext, TLSHandshake
 from .framing import GRPC_MESSAGE_PREFIX_LEN, frame_message
 from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
-from .server import ServerContext, UnaryBytesHandler
+from .server import (
+    MethodKind,
+    RawHandler,
+    Route,
+    ServerCall,
+    ServerContext,
+    UnaryBytesHandler,
+)
 from .status import Status, StatusCode, percent_encode_message
 from .stop_signals import install_wakeup_signal_handlers
 from .timeout import decode_timeout
@@ -561,13 +577,14 @@ def _status_headers(
 
 
 struct PollingServer(Movable):
-    """A bounded single-threaded Poller server for unary gRPC methods.
+    """A bounded single-threaded Poller server for gRPC methods.
 
-    Socket I/O progresses concurrently across connections. Unary handlers
-    execute one at a time on the event-loop thread, so they should be short
-    and non-blocking. The default constructor serves h2c; `tls` performs
-    non-blocking TLS handshakes and requires `h2` ALPN; `unix` binds a
-    Unix domain socket. Use `Server` for streaming RPCs. Set
+    Socket I/O progresses concurrently across connections. Handlers
+    execute one at a time on the event-loop thread. Unary handlers should
+    be short. Streaming handlers temporarily switch the connection to
+    blocking I/O and stall other connections until they return. The default
+    constructor serves h2c; `tls` performs non-blocking TLS handshakes and
+    requires `h2` ALPN; `unix` binds a Unix domain socket. Set
     `config.keepalive_interval_ns` to send HTTP/2 keepalive PINGs from the
     event loop; the default of 0 sends none. `request_stop()` or a stop
     signal sends GOAWAY and returns after live streams drain.
@@ -581,6 +598,8 @@ struct PollingServer(Movable):
     """Resource and fairness limits used by the event loop."""
     var routes: Dict[String, _PollingRoute]
     """Routing table from full method path to unary handler."""
+    var streaming_routes: Dict[String, Route]
+    """Routing table from full method path to a streaming `ServerCall` handler."""
     var _tls_context: Optional[TLSContext]
     """Reusable TLS context; None selects plaintext h2c."""
     var _unix_path: Optional[String]
@@ -619,6 +638,7 @@ struct PollingServer(Movable):
         self.port = port
         self.config = config.copy()
         self.routes = Dict[String, _PollingRoute]()
+        self.streaming_routes = Dict[String, Route]()
         self._tls_context = None
         self._unix_path = None
         self._unix_remove_existing = False
@@ -710,7 +730,7 @@ struct PollingServer(Movable):
             or parts[2].byte_length() == 0
         ):
             raise Error("grpc: method path must be '/service/method'")
-        if owned in self.routes:
+        if owned in self.routes or owned in self.streaming_routes:
             raise Error("grpc: duplicate method path " + owned)
 
     def register_unary_bytes[
@@ -762,6 +782,192 @@ struct PollingServer(Movable):
             return encode(resp)
 
         self.register_unary_bytes[wrapped](path)
+
+    def register_server_streaming_bytes[
+        handler: def(
+            List[Byte], mut ServerContext, mut ServerCall
+        ) raises thin -> None,
+    ](mut self, path: StringSpan) raises:
+        """Registers a byte-level server-streaming method.
+
+        Parameters:
+            handler: Handler taking one request payload and streaming
+                responses through `ServerCall`.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Split`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+
+        def wrapped(mut call: ServerCall, mut ctx: ServerContext) raises:
+            var msg = call.recv_bytes()
+            if call.client_cancelled():
+                call.trailers_sent = True
+                return
+            if not msg:
+                call.finish(
+                    Status(
+                        code=StatusCode.INTERNAL,
+                        message=String("missing request message"),
+                    ),
+                    ctx,
+                )
+                return
+            handler(msg.take(), ctx, call)
+            if ctx.abort_status:
+                call.finish(ctx.abort_status.value().copy(), ctx)
+                return
+            call.finish_ok(ctx)
+
+        self._validate_route(path)
+        self.streaming_routes[String(path)] = Route(
+            kind=MethodKind.SERVER_STREAMING, handler=wrapped
+        )
+
+    def register_server_streaming[
+        Req: ProtoMessage,
+        //,
+        handler: def(
+            Req, mut ServerContext, mut ServerCall
+        ) raises thin -> None,
+    ](mut self, path: StringSpan) raises:
+        """Registers a typed server-streaming method.
+
+        The wrapper waits for the full request, then the handler sends
+        responses through `ServerCall`. The handler runs to completion on
+        the event-loop thread and stalls other connections while it runs.
+
+        Parameters:
+            Req: Request message type inferred from the handler.
+            handler: Handler receiving the request and a call handle.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Split`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+
+        def wrapped(
+            request: List[Byte], mut ctx: ServerContext, mut call: ServerCall
+        ) raises:
+            var req = decode[Req](Span(request))
+            handler(req, ctx, call)
+
+        self.register_server_streaming_bytes[wrapped](path)
+
+    def register_client_streaming_bytes[
+        handler: def(mut ServerContext, mut ServerCall) raises thin -> List[
+            Byte
+        ],
+    ](mut self, path: StringSpan) raises:
+        """Registers a byte-level client-streaming method.
+
+        Parameters:
+            handler: Handler draining requests through `ServerCall` and
+                returning one response payload.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Join`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+
+        def wrapped(mut call: ServerCall, mut ctx: ServerContext) raises:
+            var payload = handler(ctx, call)
+            if ctx.abort_status:
+                call.finish(ctx.abort_status.value().copy(), ctx)
+                return
+            if call.client_cancelled():
+                call.trailers_sent = True
+                return
+            call.send_bytes(ctx, Span(payload))
+            call.finish_ok(ctx)
+
+        self._validate_route(path)
+        self.streaming_routes[String(path)] = Route(
+            kind=MethodKind.CLIENT_STREAMING, handler=wrapped
+        )
+
+    def register_client_streaming[
+        Resp: ProtoMessage,
+        //,
+        handler: def(mut ServerContext, mut ServerCall) raises thin -> Resp,
+    ](mut self, path: StringSpan) raises:
+        """Registers a typed client-streaming method.
+
+        Invoked once headers and the first window of request data are
+        ready. `ServerCall.recv` drives the blocking frame loop. The
+        handler stalls other connections until it returns.
+
+        Parameters:
+            Resp: Response message type inferred from the handler.
+            handler: Handler consuming the request stream.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Join`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+
+        def wrapped(
+            mut ctx: ServerContext, mut call: ServerCall
+        ) raises -> List[Byte]:
+            var resp = handler(ctx, call)
+            return encode(resp)
+
+        self.register_client_streaming_bytes[wrapped](path)
+
+    def register_bidi_bytes[
+        handler: def(mut ServerContext, mut ServerCall) raises thin -> None,
+    ](mut self, path: StringSpan) raises:
+        """Registers a byte-level bidirectional method.
+
+        Parameters:
+            handler: Handler driving both directions through `ServerCall`.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Chat`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+
+        def wrapped(mut call: ServerCall, mut ctx: ServerContext) raises:
+            handler(ctx, call)
+            if ctx.abort_status:
+                call.finish(ctx.abort_status.value().copy(), ctx)
+                return
+            call.finish_ok(ctx)
+
+        self._validate_route(path)
+        self.streaming_routes[String(path)] = Route(
+            kind=MethodKind.BIDI, handler=wrapped
+        )
+
+    def register_bidi[
+        handler: def(mut ServerContext, mut ServerCall) raises thin -> None,
+    ](mut self, path: StringSpan) raises:
+        """Registers a bidirectional-streaming method.
+
+        Recv-driven ping-pong: `ServerCall.recv` drives the frame loop.
+        The handler runs to completion on the event-loop thread. There is
+        no concurrent send+recv firehose.
+
+        Parameters:
+            handler: Handler driving both directions through `ServerCall`.
+
+        Args:
+            path: Full method path, such as `/echo.Echo/Chat`.
+
+        Raises:
+            If the path is malformed or already registered.
+        """
+        self.register_bidi_bytes[handler](path)
 
     def add_health_service(mut self, var registry: Health):
         """Registers `grpc.health.v1` Check on this polling server.
@@ -857,8 +1063,10 @@ struct PollingServer(Movable):
                     ),
                 )
 
-        if connection.ctx.path not in self.routes and not (
-            self.health and connection.ctx.path == HEALTH_CHECK_PATH
+        if (
+            connection.ctx.path not in self.routes
+            and (connection.ctx.path not in self.streaming_routes)
+            and not (self.health and connection.ctx.path == HEALTH_CHECK_PATH)
         ):
             self._set_request_error(
                 connection,
@@ -1109,6 +1317,178 @@ struct PollingServer(Movable):
             connection.io_blocked_read = False
         return True
 
+    def _incomplete_wire(self, connection: _PollingConnection) -> Bool:
+        return (
+            connection.h2.pending_input_frame_count() > 0
+            or connection.h2._input_decoder.buffered_len() > 0
+        )
+
+    def _flush_connection_blocking(
+        self, mut connection: _PollingConnection
+    ) raises:
+        connection.h2.stream.set_nonblocking(False)
+        while len(connection.output) > 0:
+            var start = connection.output.offset
+            var count = connection.h2.stream.write_some(
+                Span(connection.output.data)[
+                    start : len(connection.output.data)
+                ]
+            )
+            if count <= 0:
+                raise Error("grpc: blocking flush made no progress")
+            connection.output.advance(count)
+        connection.h2.flush_output()
+        connection.last_activity_ns = Int64(monotonic())
+        connection.h2.touch_keepalive(connection.last_activity_ns)
+        connection.io_wants_read = False
+        connection.io_wants_write = False
+        connection.io_blocked_read = False
+
+    def _restore_polling_io(self, mut connection: _PollingConnection) raises:
+        try:
+            connection.h2.stream.set_read_timeout(0)
+        except:
+            pass
+        try:
+            connection.h2.stream.set_write_timeout(0)
+        except:
+            pass
+        connection.h2.stream.set_nonblocking(True)
+        connection.io_wants_read = False
+        connection.io_wants_write = False
+        connection.io_blocked_read = False
+        connection.resume_read = False
+
+    def _finish_streaming_call(self, mut connection: _PollingConnection) raises:
+        var sid = connection.active_sid
+        if sid == 0:
+            return
+        if not connection.h2.retire_stream(sid):
+            try:
+                connection.h2.send_rst_stream(sid, ERR_CANCEL)
+            except:
+                pass
+            _ = connection.h2.retire_stream(sid)
+        connection.handler_called = True
+        connection.headers_queued = True
+        connection.trailers_queued = True
+        connection.reset_call()
+
+    def _run_blocking_stream(
+        mut self, mut connection: _PollingConnection
+    ) raises:
+        var remaining = connection.deadline_remaining(Int64(monotonic()))
+        self._flush_connection_blocking(connection)
+        if remaining > 0:
+            connection.h2.stream.set_read_timeout(remaining)
+        elif connection.ctx.timeout_ns > 0 and remaining <= 0:
+            var call = ServerCall(
+                _conn=Pointer(to=connection.h2).unsafe_origin_cast[
+                    MutUntrackedOrigin
+                ](),
+                sid=connection.active_sid,
+                headers_sent=False,
+                trailers_sent=False,
+                call_start_ns=connection.call_start_ns,
+                max_message_size=self.config.max_message_size,
+                _oversized_message=False,
+            )
+            call.finish(
+                Status(
+                    code=StatusCode.DEADLINE_EXCEEDED,
+                    message=String("Deadline Exceeded"),
+                ),
+                connection.ctx,
+            )
+            self._restore_polling_io(connection)
+            self._finish_streaming_call(connection)
+            return
+
+        var call = ServerCall(
+            _conn=Pointer(to=connection.h2).unsafe_origin_cast[
+                MutUntrackedOrigin
+            ](),
+            sid=connection.active_sid,
+            headers_sent=False,
+            trailers_sent=False,
+            call_start_ns=connection.call_start_ns,
+            max_message_size=self.config.max_message_size,
+            _oversized_message=False,
+        )
+        var handler = self.streaming_routes[connection.ctx.path].handler
+        try:
+            handler(call, connection.ctx)
+        except e:
+            if not call.trailers_sent:
+                var message = String(e)
+                var code = StatusCode.UNKNOWN
+                if call._oversized_message:
+                    code = StatusCode.RESOURCE_EXHAUSTED
+                try:
+                    call.finish(
+                        Status(code=code, message=message), connection.ctx
+                    )
+                except:
+                    pass
+        if connection.ctx.stop_server:
+            self._stop_requested = True
+        self._restore_polling_io(connection)
+        self._finish_streaming_call(connection)
+
+    def _drive_streaming(mut self, mut connection: _PollingConnection) raises:
+        if connection.h2.pending_input_frame_count() > 0:
+            _ = connection.h2.feed_input(
+                Span(List[Byte]()), self.config.max_frames_per_event
+            )
+            if connection.h2.pending_output_len() > 0:
+                _ = self._move_http2_output(connection)
+                return
+        if self._incomplete_wire(connection):
+            return
+
+        if connection.unsupported_media_type or connection.request_error:
+            if not self._request_ended(connection):
+                return
+            connection.handler_called = True
+            if connection.request_error:
+                connection.response_status = (
+                    connection.request_error.value().copy()
+                )
+            self._queue_response_step(connection)
+            _ = self._move_http2_output(connection)
+            if connection.trailers_queued:
+                var sid = connection.active_sid
+                if connection.h2.retire_stream(sid):
+                    connection.reset_call()
+            return
+
+        if connection.deadline_expired(Int64(monotonic())):
+            connection.handler_called = True
+            connection.response_status = Status(
+                code=StatusCode.DEADLINE_EXCEEDED,
+                message=String("Deadline Exceeded"),
+            )
+            self._queue_response_step(connection)
+            _ = self._move_http2_output(connection)
+            if connection.trailers_queued:
+                var sid = connection.active_sid
+                if connection.h2.retire_stream(sid):
+                    connection.reset_call()
+            return
+
+        var kind = self.streaming_routes[connection.ctx.path].kind
+        if kind == MethodKind.SERVER_STREAMING:
+            if not self._request_ended(connection):
+                return
+        else:
+            var has_data = (
+                connection.h2.buffered_data_len(connection.active_sid) > 0
+            )
+            if not has_data and not self._request_ended(connection):
+                return
+
+        self._run_blocking_stream(connection)
+
     def _drive_connection(mut self, mut connection: _PollingConnection) raises:
         # Never queue HTTP/2 output behind an unsent socket suffix. This is
         # the per-connection output bound and partial-write invariant.
@@ -1122,6 +1502,10 @@ struct PollingServer(Movable):
         if connection.h2.streams[connection.active_sid].reset_code:
             _ = connection.h2.retire_stream(connection.active_sid)
             connection.reset_call()
+            return
+
+        if connection.ctx.path in self.streaming_routes:
+            self._drive_streaming(connection)
             return
 
         while connection.h2.buffered_data_len(connection.active_sid) > 0:

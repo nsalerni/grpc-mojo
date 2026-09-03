@@ -3,7 +3,13 @@
 from std.ffi import c_int
 from std.testing import assert_equal, assert_true
 
-from grpc import Health, PollingServer, PollingServerConfig, ServerContext
+from grpc import (
+    Health,
+    PollingServer,
+    PollingServerConfig,
+    ServerCall,
+    ServerContext,
+)
 from grpc.polling_server import (
     _PendingWrite,
     _can_move_http2_output,
@@ -24,6 +30,19 @@ def echo_bytes(
     return request.copy()
 
 
+def split_noop(
+    request: List[Byte], mut ctx: ServerContext, mut call: ServerCall
+) raises:
+    _ = request
+    _ = ctx
+    _ = call
+
+
+def bidi_noop(mut ctx: ServerContext, mut call: ServerCall) raises:
+    _ = ctx
+    _ = call
+
+
 def test_config_and_registration() raises:
     var config = PollingServerConfig(
         max_connections=4,
@@ -36,6 +55,7 @@ def test_config_and_registration() raises:
     config.validate()
     var server = PollingServer("127.0.0.1", 0, config)
     server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
+    server.register_server_streaming_bytes[split_noop]("/probe.Probe/Split")
 
     var raised = False
     try:
@@ -43,6 +63,20 @@ def test_config_and_registration() raises:
     except:
         raised = True
     assert_true(raised, "duplicate routes must raise")
+
+    raised = False
+    try:
+        server.register_bidi_bytes[bidi_noop]("/probe.Probe/Echo")
+    except:
+        raised = True
+    assert_true(raised, "streaming must not replace a unary path")
+
+    raised = False
+    try:
+        server.register_unary_bytes[echo_bytes]("/probe.Probe/Split")
+    except:
+        raised = True
+    assert_true(raised, "unary must not replace a streaming path")
 
     raised = False
     try:
