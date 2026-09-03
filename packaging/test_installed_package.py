@@ -159,7 +159,7 @@ def main() -> None:
             index_channel(channel)
 
         artifact = build_package(
-            "grpc-mojo", "0.2.3", ROOT, work / "grpc-mojo", channel
+            "grpc-mojo", "0.2.4", ROOT, work / "grpc-mojo", channel
         )
         test_command = [
             "pixi",

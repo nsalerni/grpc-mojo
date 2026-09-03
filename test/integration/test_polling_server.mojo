@@ -3,7 +3,7 @@
 from std.ffi import c_int
 from std.testing import assert_equal, assert_true
 
-from grpc import PollingServer, PollingServerConfig, ServerContext
+from grpc import Health, PollingServer, PollingServerConfig, ServerContext
 from grpc.polling_server import (
     _PendingWrite,
     _can_move_http2_output,
@@ -210,6 +210,7 @@ def test_config_and_registration() raises:
     assert_true(not unix_server._unix_remove_existing)
     assert_true(not unix_server._tls_context)
     unix_server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
+    unix_server.add_health_service(Health())
 
     var unix_tls = PollingServer.unix(
         "/tmp/grpc-mojo-polling-unused.sock",

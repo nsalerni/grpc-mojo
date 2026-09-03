@@ -2,6 +2,7 @@ from std.testing import assert_equal, assert_true
 
 from grpc import (
     GrpcChannel,
+    Health,
     Metadata,
     PollingServer,
     PollingServerConfig,
@@ -151,4 +152,7 @@ def main() raises:
 
     _ = TLSContext.client(verify=False, alpn=["h2"])
     _check_peer_certificate_api()
+    var health = Health()
+    health.set_status("echo.Echo", 1)
+    assert_true(health.status("echo.Echo"))
     print("grpc-mojo package smoke test passed")

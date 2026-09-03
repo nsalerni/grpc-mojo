@@ -60,4 +60,6 @@ serially. Unix listeners are plaintext only.
 ## Out of scope for v0
 
 Compression (`grpc-encoding: gzip`), retries, service config, load balancing,
-channelz, reflection, and health services. Tracked in [ROADMAP.md](ROADMAP.md).
+channelz, and reflection. Health **Check** is implemented; **Watch** returns
+UNIMPLEMENTED because status changes during a live stream need threads or
+async. Tracked in [ROADMAP.md](ROADMAP.md).
