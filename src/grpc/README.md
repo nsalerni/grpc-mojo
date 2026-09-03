@@ -23,17 +23,18 @@ Handlers receive an owned snapshot in `ServerContext.peer_certificate`.
 The field is `None` for h2c, Unix sockets, and TLS peers without a client
 certificate. Authorization code must check the snapshot's `verified` field.
 
-Blocking local services can use `GrpcChannel.connect_unix` and `Server.unix`.
-The client uses `localhost` as its default `:authority`. The server refuses
-to replace an existing socket path unless `remove_existing=True`.
+Blocking local services can use `GrpcChannel.connect_unix` with `Server.unix`
+or `PollingServer.unix`. The client uses `localhost` as its default
+`:authority`. Both servers refuse to replace an existing socket path unless
+`remove_existing=True`. Unix listeners are plaintext only.
 
-`PollingServer` is a separate opt-in server for unary h2c or TLS services. It
-uses `mojo-net` readiness polling to progress bounded I/O and TLS handshakes
-across many connections on one thread. Its connection, handshake, accept,
-inactivity, incomplete-request, read, frame, write, message, and output limits
-are explicit. TLS requires the `h2` ALPN token and can authenticate client
-certificates during its non-blocking handshake. Handlers execute serially,
-and streaming methods remain on `Server`.
+`PollingServer` is a separate opt-in server for unary h2c, TLS, or Unix
+services. It uses `mojo-net` readiness polling to progress bounded I/O and
+TLS handshakes across many connections on one thread. Its connection,
+handshake, accept, inactivity, incomplete-request, read, frame, write,
+message, and output limits are explicit. TLS requires the `h2` ALPN token
+and can authenticate client certificates during its non-blocking handshake.
+Handlers execute serially, and streaming methods remain on `Server`.
 
 Verification: the 12 canonical gRPC interop cases pass in both directions
 over h2c, TLS, and Unix domain sockets against `grpcio`

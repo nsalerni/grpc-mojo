@@ -8,15 +8,16 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""A bounded readiness-driven server for unary h2c or TLS RPCs.
+"""A bounded readiness-driven server for unary h2c, TLS, or Unix RPCs.
 
 `PollingServer` is an opt-in alternative to the blocking `Server`. It uses
 `mojo-net`'s kqueue/epoll `Poller` so one thread can make progress on many
-TCP connections. Handler functions still run serially and must return
-promptly. Streaming RPCs, Unix sockets, and graceful shutdown remain on the
-blocking server path. TLS handshakes advance through the same Poller and
-strictly require the `h2` ALPN token. Optional HTTP/2 keepalive PINGs are
-driven from the Poller loop when `keepalive_interval_ns` is positive.
+connections. Handler functions still run serially and must return
+promptly. Streaming RPCs and graceful shutdown remain on the blocking
+server path, or on later PollingServer methods. TLS handshakes advance
+through the same Poller and strictly require the `h2` ALPN token. Unix
+sockets are plaintext only. Optional HTTP/2 keepalive PINGs are driven
+from the Poller loop when `keepalive_interval_ns` is positive.
 
 Every connection has one active RPC stream and explicit inactivity, request,
 read, frame, write, message, and output limits. The HTTP/2 output queue and
@@ -37,7 +38,7 @@ from std.time import monotonic
 
 from hpack import HeaderField
 from h2 import DEFAULT_WINDOW_SIZE, H2_ALPN, Http2Connection, get_u32_be
-from net import PollEvent, Poller, TCPListener, is_would_block
+from net import PollEvent, Poller, TCPListener, UnixListener, is_would_block
 from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
 
@@ -201,7 +202,9 @@ struct PollingServerConfig(Copyable, Movable):
         ):
             raise Error("grpc: timeout exceeds Poller millisecond range")
         if self.keepalive_interval_ns > Int64(max_timeout_ms) * 1_000_000:
-            raise Error("grpc: keepalive interval exceeds Poller millisecond range")
+            raise Error(
+                "grpc: keepalive interval exceeds Poller millisecond range"
+            )
 
 
 @fieldwise_init
@@ -541,9 +544,10 @@ struct PollingServer(Movable):
     Socket I/O progresses concurrently across connections. Unary handlers
     execute one at a time on the event-loop thread, so they should be short
     and non-blocking. The default constructor serves h2c; `tls` performs
-    non-blocking TLS handshakes and requires `h2` ALPN. Use `Server` for
-    streaming RPCs. Set `config.keepalive_interval_ns` to send HTTP/2
-    keepalive PINGs from the event loop; the default of 0 sends none.
+    non-blocking TLS handshakes and requires `h2` ALPN; `unix` binds a
+    Unix domain socket. Use `Server` for streaming RPCs. Set
+    `config.keepalive_interval_ns` to send HTTP/2 keepalive PINGs from the
+    event loop; the default of 0 sends none.
     """
 
     var host: String
@@ -556,6 +560,10 @@ struct PollingServer(Movable):
     """Routing table from full method path to unary handler."""
     var _tls_context: Optional[TLSContext]
     """Reusable TLS context; None selects plaintext h2c."""
+    var _unix_path: Optional[String]
+    """Unix domain socket path; None selects a TCP listener."""
+    var _unix_remove_existing: Bool
+    """Whether a Unix listener may remove an existing socket file."""
 
     def __init__(
         out self,
@@ -579,6 +587,8 @@ struct PollingServer(Movable):
         self.config = config.copy()
         self.routes = Dict[String, _PollingRoute]()
         self._tls_context = None
+        self._unix_path = None
+        self._unix_remove_existing = False
 
     @staticmethod
     def tls(
@@ -621,6 +631,35 @@ struct PollingServer(Movable):
             client_ca_file=String(client_ca_file),
             require_client_cert=require_client_cert,
         )
+        return out^
+
+    @staticmethod
+    def unix(
+        path: StringSpan,
+        *,
+        remove_existing: Bool = False,
+        config: PollingServerConfig = PollingServerConfig(),
+    ) raises -> PollingServer:
+        """Constructs a plaintext polling server on a Unix domain socket.
+
+        TLS is not supported on Unix listeners. An existing socket file
+        is refused unless `remove_existing=True`.
+
+        Args:
+            path: Filesystem path to bind.
+            remove_existing: Remove an existing socket file before bind.
+                The default refuses to replace any existing path.
+            config: Resource and fairness limits for the event loop.
+
+        Returns:
+            A polling server configured for the Unix domain socket.
+
+        Raises:
+            If a configured limit is outside its supported range.
+        """
+        var out = PollingServer("", 0, config)
+        out._unix_path = String(path)
+        out._unix_remove_existing = remove_existing
         return out^
 
     def _validate_route(self, path: StringSpan) raises:
@@ -1228,31 +1267,48 @@ struct PollingServer(Movable):
         return False
 
     def serve(mut self) raises:
-        """Runs the h2c or TLS event loop forever.
+        """Runs the h2c, TLS, or Unix event loop forever.
 
         The bound address is printed after the listener is registered. The
         method does not return during normal operation.
 
         Raises:
             If listener setup, polling, socket I/O, or protocol processing
-            fails.
+            fails, or if TLS and Unix are configured together.
         """
-        var listener = TCPListener(self.host, self.port)
-        listener.set_nonblocking(True)
-        var listener_fd = listener.descriptor()
+        if self._unix_path and self._tls_context:
+            raise Error("grpc: PollingServer does not support TLS over Unix")
+
+        var tcp_listener: Optional[TCPListener] = None
+        var unix_listener: Optional[UnixListener] = None
+        var listener_fd: c_int
+        if self._unix_path:
+            var path = self._unix_path.value().copy()
+            var unix = UnixListener(
+                path, remove_existing=self._unix_remove_existing
+            )
+            unix.set_nonblocking(True)
+            listener_fd = unix.descriptor()
+            unix_listener = unix^
+            print("grpc-mojo polling server listening on unix:", path)
+        else:
+            var tcp = TCPListener(self.host, self.port)
+            tcp.set_nonblocking(True)
+            listener_fd = tcp.descriptor()
+            print(
+                "grpc-mojo polling server listening on ",
+                self.host,
+                ":",
+                tcp.local_port,
+                sep="",
+            )
+            tcp_listener = tcp^
         var poller = Poller()
         poller.register(listener_fd, readable=True, writable=False)
         var listener_registered = True
         var connections = Dict[c_int, _PollingConnection]()
         var handshakes = Dict[c_int, _PollingHandshake]()
         var fds = List[c_int]()
-        print(
-            "grpc-mojo polling server listening on ",
-            self.host,
-            ":",
-            listener.local_port,
-            sep="",
-        )
 
         while True:
             var events = _coalesce_poll_events(
@@ -1412,10 +1468,7 @@ struct PollingServer(Movable):
                         closing[fd] = connection^
                         close_fds.append(fd)
                         continue
-                if (
-                    self.config.keepalive_interval_ns > 0
-                    and fd in connections
-                ):
+                if self.config.keepalive_interval_ns > 0 and fd in connections:
                     var connection = connections.pop(fd)
                     try:
                         if (
@@ -1520,7 +1573,20 @@ struct PollingServer(Movable):
                     )
                 ):
                     try:
-                        var tcp = listener.accept()
+                        if unix_listener:
+                            var unix = unix_listener.value().accept()
+                            unix.set_nonblocking(True)
+                            accepts += 1
+                            var transport = GrpcTransport.local(unix^)
+                            var connection = _PollingConnection(
+                                transport^, self.config
+                            )
+                            var fd = connection.descriptor()
+                            poller.register(fd, readable=True, writable=False)
+                            connections[fd] = connection^
+                            fds.append(fd)
+                            continue
+                        var tcp = tcp_listener.value().accept()
                         tcp.set_nonblocking(True)
                         accepts += 1
                         if self._tls_context:

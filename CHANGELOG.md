@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `PollingServer.unix(path, *, remove_existing=)` so the Poller
+  server can bind a Unix domain socket. TLS over Unix is refused. An
+  existing socket file is refused unless `remove_existing=True`, matching
+  `Server.unix`. The package version and `user-agent` string are 0.2.3.
+
 - Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
   verification) as done. Known-gap text no longer claims that
   `initial_window_size` is missing.
