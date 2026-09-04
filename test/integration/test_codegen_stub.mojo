@@ -4,7 +4,7 @@
 from std.testing import assert_equal
 
 from common import to_hex
-from echo_pb import ECHO_SAY_PATH, EchoClient, EchoRequest
+from echo_pb import ECHO_SAY_PATH, EchoClient, EchoRequest, add_echo_polling_service, add_echo_service
 from proto import encode
 
 
@@ -13,6 +13,9 @@ def test_generated_service_stub() raises:
     var req = EchoRequest()
     req.message = "x"
     assert_equal(to_hex(encode(req)), "0a0178")
+    # Keep both registration helpers in the compile graph.
+    _ = add_echo_service
+    _ = add_echo_polling_service
 
 
 def main() raises:
