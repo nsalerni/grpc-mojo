@@ -9,7 +9,9 @@ static void grpc_stop_handler(int sig) {
     unsigned char byte = 1;
     (void)sig;
     if (grpc_stop_write_fd >= 0) {
-        (void)write(grpc_stop_write_fd, &byte, 1);
+        /* GCC -Werror=unused-result ignores a void cast on write(2). */
+        ssize_t n = write(grpc_stop_write_fd, &byte, 1);
+        (void)n;
     }
 }
 
