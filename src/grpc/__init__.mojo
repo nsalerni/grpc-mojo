@@ -79,6 +79,14 @@ from .framing import (
     recv_message,
     send_message,
 )
+from .health import (
+    HEALTH_CHECK_PATH,
+    HEALTH_WATCH_PATH,
+    Health,
+    HealthCheckRequest,
+    HealthCheckResponse,
+    ServingStatus,
+)
 from .metadata import (
     Metadata,
     decode_bin_value,

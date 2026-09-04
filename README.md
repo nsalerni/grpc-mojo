@@ -81,6 +81,7 @@ Unix sockets and mTLS are documented in [src/grpc/README.md](src/grpc/README.md)
 - h2c, TLS (`h2` ALPN), and Unix domain sockets
 - Optional `PollingServer` for many unary h2c, TLS, or Unix connections
   on one thread
+- `grpc.health.v1` Check (`Watch` returns UNIMPLEMENTED)
 
 ## Current limits
 

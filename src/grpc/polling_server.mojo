@@ -43,6 +43,7 @@ from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
 
 from .framing import GRPC_MESSAGE_PREFIX_LEN, frame_message
+from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
 from .server import ServerContext, UnaryBytesHandler
 from .status import Status, StatusCode, percent_encode_message
@@ -564,6 +565,8 @@ struct PollingServer(Movable):
     """Unix domain socket path; None selects a TCP listener."""
     var _unix_remove_existing: Bool
     """Whether a Unix listener may remove an existing socket file."""
+    var health: Optional[Health]
+    """Health registry for Check; None leaves the method UNIMPLEMENTED."""
 
     def __init__(
         out self,
@@ -589,6 +592,7 @@ struct PollingServer(Movable):
         self._tls_context = None
         self._unix_path = None
         self._unix_remove_existing = False
+        self.health = None
 
     @staticmethod
     def tls(
@@ -725,6 +729,18 @@ struct PollingServer(Movable):
 
         self.register_unary_bytes[wrapped](path)
 
+    def add_health_service(mut self, var registry: Health):
+        """Registers `grpc.health.v1` Check on this polling server.
+
+        Watch is not registered. Clients receive UNIMPLEMENTED and fall
+        back to Check. After this returns, further `set_status` calls
+        must go through `self.health`.
+
+        Args:
+            registry: Serving-status map. The empty name defaults to SERVING.
+        """
+        self.health = registry^
+
     def _set_request_error(
         self, mut connection: _PollingConnection, status: Status
     ):
@@ -775,7 +791,9 @@ struct PollingServer(Movable):
                     ),
                 )
 
-        if connection.ctx.path not in self.routes:
+        if connection.ctx.path not in self.routes and not (
+            self.health and connection.ctx.path == HEALTH_CHECK_PATH
+        ):
             self._set_request_error(
                 connection,
                 Status(
@@ -892,14 +910,26 @@ struct PollingServer(Movable):
             )
             return
 
-        var handler = self.routes[connection.ctx.path].handler
         try:
-            var payload = handler(connection.request^, connection.ctx)
-            if connection.ctx.abort_status:
-                connection.response_status = (
-                    connection.ctx.abort_status.value().copy()
+            var payload: List[Byte]
+            if self.health and connection.ctx.path == HEALTH_CHECK_PATH:
+                var outcome = self.health.value().check_bytes(
+                    Span(connection.request)
                 )
-            elif len(payload) > self.config.max_message_size:
+                var grpc_status = outcome.grpc_status.copy()
+                payload = outcome.payload.copy()
+                if not grpc_status.is_ok():
+                    connection.response_status = grpc_status^
+                    return
+            else:
+                var handler = self.routes[connection.ctx.path].handler
+                payload = handler(connection.request^, connection.ctx)
+                if connection.ctx.abort_status:
+                    connection.response_status = (
+                        connection.ctx.abort_status.value().copy()
+                    )
+                    return
+            if len(payload) > self.config.max_message_size:
                 connection.response_status = Status(
                     code=StatusCode.RESOURCE_EXHAUSTED,
                     message=String("response message exceeds max size"),

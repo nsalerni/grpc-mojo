@@ -36,6 +36,12 @@ message, and output limits are explicit. TLS requires the `h2` ALPN token
 and can authenticate client certificates during its non-blocking handshake.
 Handlers execute serially, and streaming methods remain on `Server`.
 
+`Server.add_health_service` and `PollingServer.add_health_service` register
+`grpc.health.v1` Check. `Health.set_status` / `status` keep the serving map;
+the empty name is overall status and defaults to SERVING. Unknown names
+return NOT_FOUND. Watch is not registered, so clients receive UNIMPLEMENTED
+and fall back to Check.
+
 Verification: the 12 canonical gRPC interop cases pass in both directions
 over h2c, TLS, and Unix domain sockets against `grpcio`
 (`pixi run interop-official`), plus

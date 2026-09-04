@@ -6,6 +6,10 @@
   server can bind a Unix domain socket. TLS over Unix is refused. An
   existing socket file is refused unless `remove_existing=True`, matching
   `Server.unix`. The package version and `user-agent` string are 0.2.3.
+- Added `grpc.health.v1` Check on `Server` and `PollingServer` via
+  `Health` and `add_health_service`. The empty service name is overall
+  status (default SERVING). Unknown names return NOT_FOUND. Watch is not
+  registered, so clients receive UNIMPLEMENTED. Version is 0.2.4.
 
 - Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
   verification) as done. Known-gap text no longer claims that

@@ -46,6 +46,7 @@ from .framing import (
     recv_message,
     send_message,
 )
+from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
 from .status import Status, StatusCode, percent_encode_message
 from .timeout import decode_timeout
@@ -431,6 +432,8 @@ struct Server(Movable):
     """Unix domain socket path; None selects a TCP listener."""
     var _unix_remove_existing: Bool
     """Whether a Unix listener may remove an existing socket file."""
+    var health: Optional[Health]
+    """Health registry for Check; None leaves the method UNIMPLEMENTED."""
     var max_message_size: Int
     """Maximum serialized request or response size, default 4 MiB."""
     var initial_window_size: UInt32
@@ -451,6 +454,7 @@ struct Server(Movable):
         self._peer_certificate = None
         self._unix_path = None
         self._unix_remove_existing = False
+        self.health = None
         self.max_message_size = DEFAULT_MAX_RECV_MESSAGE_SIZE
         self.initial_window_size = DEFAULT_WINDOW_SIZE
 
@@ -615,6 +619,18 @@ struct Server(Movable):
 
         self.register_unary_bytes[wrapped](path)
 
+    def add_health_service(mut self, var registry: Health):
+        """Registers `grpc.health.v1` Check on this server.
+
+        Watch is not registered. Clients receive UNIMPLEMENTED and fall
+        back to Check. After this returns, further `set_status` calls
+        must go through `self.health`.
+
+        Args:
+            registry: Serving-status map. The empty name defaults to SERVING.
+        """
+        self.health = registry^
+
     def register_server_streaming[
         Req: ProtoMessage,
         //,
@@ -776,6 +792,18 @@ struct Server(Movable):
                 )
                 return
 
+        if self.health and ctx.path == HEALTH_CHECK_PATH:
+            try:
+                self._serve_health_check(call, ctx)
+            except e:
+                if not call.trailers_sent:
+                    var message = String(e)
+                    var code = StatusCode.UNKNOWN
+                    if call._oversized_message:
+                        code = StatusCode.RESOURCE_EXHAUSTED
+                    call.finish(Status(code=code, message=message), ctx)
+            return
+
         if ctx.path not in self.routes:
             call.finish(
                 Status(
@@ -799,6 +827,32 @@ struct Server(Movable):
                 if call._oversized_message:
                     code = StatusCode.RESOURCE_EXHAUSTED
                 call.finish(Status(code=code, message=message), ctx)
+
+    def _serve_health_check(
+        mut self, mut call: ServerCall, mut ctx: ServerContext
+    ) raises:
+        var msg = call.recv_bytes()
+        if call.client_cancelled():
+            call.trailers_sent = True
+            return
+        if not msg:
+            call.finish(
+                Status(
+                    code=StatusCode.INTERNAL,
+                    message=String("missing request message"),
+                ),
+                ctx,
+            )
+            return
+        var outcome = self.health.value().check_bytes(Span(msg.value()))
+        if call.deadline_blown(ctx) or call.client_cancelled():
+            call.finish_ok(ctx)
+            return
+        if not outcome.grpc_status.is_ok():
+            call.finish(outcome.grpc_status.copy(), ctx)
+            return
+        call.send_bytes(ctx, Span(outcome.payload))
+        call.finish_ok(ctx)
 
     def dispatch_ready(
         mut self,
