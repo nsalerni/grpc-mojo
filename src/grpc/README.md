@@ -42,6 +42,10 @@ the empty name is overall status and defaults to SERVING. Unknown names
 return NOT_FOUND. Watch is not registered, so clients receive UNIMPLEMENTED
 and fall back to Check.
 
+`PollingServer.request_stop()` sends GOAWAY and returns after live streams
+drain. `install_stop_signals()` writes the wakeup pipe from SIGTERM/SIGINT.
+There is no stop-from-another-thread API.
+
 Verification: the 12 canonical gRPC interop cases pass in both directions
 over h2c, TLS, and Unix domain sockets against `grpcio`
 (`pixi run interop-official`), plus

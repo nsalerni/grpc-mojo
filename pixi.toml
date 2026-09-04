@@ -3,13 +3,14 @@ authors = ["Nick Salerni <nick.salerni@gmail.com>"]
 channels = ["https://conda.modular.com/max", "conda-forge"]
 name = "grpc-mojo"
 platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
-version = "0.2.4"
+version = "0.2.5"
 license = "Apache-2.0"
 preview = ["pixi-build"]
 
 [tasks]
 prepare-tls = "python3 tools/prepare_tls.py"
-test = { cmd = "python3 tools/check_compliance_report.py && python3 test/compliance/test_compliance_registry.py && python3 -B test/compliance/test_grpc_framing_sequences.py && python3 test/integration/test_grpc_health.py && python3 tools/run_tests.py", depends-on = ["prepare-tls"] }
+prepare-stop = "bash tools/build_stop_signals.sh"
+test = { cmd = "python3 tools/check_compliance_report.py && python3 test/compliance/test_compliance_registry.py && python3 -B test/compliance/test_grpc_framing_sequences.py && python3 test/integration/test_grpc_health.py && python3 tools/run_tests.py", depends-on = ["prepare-tls", "prepare-stop"] }
 bench = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo"
 bench-smoke = "mojo run -I packages/protomojo/src -I packages/protomojo/test packages/protomojo/bench/bench_proto.mojo --smoke && mojo run -I packages/mojo-http2/src -I packages/mojo-net/src -I packages/mojo-tls/src packages/mojo-http2/bench/bench_http2.mojo --smoke && mojo run -I packages/mojo-net/src packages/mojo-net/bench/bench_net.mojo --smoke && mojo run -I packages/mojo-net/src -I packages/mojo-http2/src -I packages/mojo-tls/src -I packages/protomojo/src -I src -I test bench/bench_grpc.mojo --smoke"
 bench-compare = "python3 bench/compare.py"
@@ -46,7 +47,7 @@ hyperframe = ">=6.0"
 
 [package]
 name = "grpc-mojo"
-version = "0.2.4"
+version = "0.2.5"
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "0.*" }

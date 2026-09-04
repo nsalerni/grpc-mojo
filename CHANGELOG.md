@@ -10,6 +10,11 @@
   `Health` and `add_health_service`. The empty service name is overall
   status (default SERVING). Unknown names return NOT_FOUND. Watch is not
   registered, so clients receive UNIMPLEMENTED. Version is 0.2.4.
+- Added `PollingServer.request_stop()` and optional SIGTERM/SIGINT
+  handlers that wake `Poller.wait` through `net.Wakeup`, send GOAWAY, and
+  drain live streams on the event-loop thread. This is not a cross-thread
+  API. Requires mojo-net 0.2.6 (`Wakeup`) and mojo-tls 0.3.2
+  (`TLSStream.set_write_timeout`). Version is 0.2.5.
 
 - Marked shipped ROADMAP tracks (A3 robustness, A4 codegen, B1–B4
   verification) as done. Known-gap text no longer claims that

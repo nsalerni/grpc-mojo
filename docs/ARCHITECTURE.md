@@ -55,7 +55,8 @@ on top of HTTP/2.
 Mojo 1.0 has no public async I/O runtime. `Server` is blocking and sequential.
 `PollingServer` uses kqueue or epoll to make bounded progress across many
 unary h2c, TLS, or Unix connections on one thread; handlers still run
-serially. Unix listeners are plaintext only.
+serially. Unix listeners are plaintext only. `request_stop()` drains via
+GOAWAY on that same thread; there is no cross-thread stop.
 
 ## Out of scope for v0
 
