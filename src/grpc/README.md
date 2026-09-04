@@ -28,13 +28,16 @@ or `PollingServer.unix`. The client uses `localhost` as its default
 `:authority`. Both servers refuse to replace an existing socket path unless
 `remove_existing=True`. Unix listeners are plaintext only.
 
-`PollingServer` is a separate opt-in server for unary h2c, TLS, or Unix
+`PollingServer` is a separate opt-in server for h2c, TLS, or Unix
 services. It uses `mojo-net` readiness polling to progress bounded I/O and
 TLS handshakes across many connections on one thread. Its connection,
 handshake, accept, inactivity, incomplete-request, read, frame, write,
 message, and output limits are explicit. TLS requires the `h2` ALPN token
 and can authenticate client certificates during its non-blocking handshake.
-Handlers execute serially, and streaming methods remain on `Server`.
+Handlers execute serially. Streaming methods run to completion through a
+temporary blocking `ServerCall` and stall other connections while they
+run. Long-lived streams belong on process-per-connection `Server` until
+Mojo ships threads or async.
 
 `Server.add_health_service` and `PollingServer.add_health_service` register
 `grpc.health.v1` Check. `Health.set_status` / `status` keep the serving map;

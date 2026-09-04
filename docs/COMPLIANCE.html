@@ -504,7 +504,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>
 <li><strong>Compression</strong>: mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Published mojo-zlib depends on nightly Mojo, not 1.0. Compressed messages are rejected, never mis-decoded.</li>
-<li><strong>Concurrency</strong>: PollingServer overlaps bounded unary h2c or TLS connection I/O; handlers remain serialized. Streaming RPCs use the blocking server (PRIMITIVES.md #7).</li>
+<li><strong>Concurrency</strong>: PollingServer overlaps bounded h2c or TLS connection I/O; handlers remain serialized. Streaming handlers run to completion on the poll thread (PRIMITIVES.md #7).</li>
 <li><strong>Control plane</strong>: Keepalive PINGs on the blocking Server wait on Mojo threads or a public async runtime. PollingServer.request_stop() sends GOAWAY and drains on the event-loop thread. Configurable HTTP/2 initial_window_size already ships.</li>
 <li><strong>hpack value encoding</strong>: header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
 </ul></section>

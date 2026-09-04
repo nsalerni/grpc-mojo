@@ -34,8 +34,10 @@ read/write timeouts with a typed timeout error. **Publish-ready.**
 timers-as-futures. Everything async-adjacent is `_`-prefixed/private.
 
 **What we built**: `mojo-net` provides a `Poller` over kqueue and epoll plus
-non-blocking readiness streams. `grpc-mojo` uses it in the unary h2c, TLS,
-and Unix `PollingServer`, while the full server remains blocking.
+non-blocking readiness streams. `grpc-mojo` uses it in the h2c, TLS,
+and Unix `PollingServer`. Streaming handlers temporarily switch a
+connection to blocking I/O on that same thread. The process-per-connection
+`Server` remains fully blocking.
 
 **Plan**: keep the poll-based API usable without an async runtime, then add
 `async fn read()/write()` adapters once Modular stabilizes the coroutine ABI.
