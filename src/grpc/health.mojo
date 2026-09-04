@@ -60,19 +60,44 @@ struct HealthCheckRequest(Copyable, Defaultable, Movable, ProtoMessage):
     """Preserved unknown fields, re-emitted on encode."""
 
     def __init__(out self):
+        """Initializes all fields to their proto3 defaults."""
         self.service = String()
         self._unknown = List[Byte]()
 
     def __init__(out self, var service: String):
+        """Sets the service name.
+
+        Args:
+            service: Service name; empty selects overall status.
+        """
         self.service = service^
         self._unknown = List[Byte]()
 
     def encode_to(self, mut writer: WireWriter):
+        """Appends the wire-format bytes to the writer.
+
+        Fields set to their proto3 default are omitted; preserved
+        unknown fields are re-emitted at the end.
+
+        Args:
+            writer: Destination wire-format writer.
+        """
         if self.service.byte_length() != 0:
             writer.string_field(1, self.service)
         writer.buf.extend(Span(self._unknown))
 
     def merge_from(mut self, mut reader: WireReader) raises:
+        """Merges fields decoded from the reader into this message.
+
+        Later singular values overwrite earlier ones, and unknown
+        fields are preserved.
+
+        Args:
+            reader: Source wire-format reader.
+
+        Raises:
+            If the input is not valid protobuf wire data.
+        """
         while not reader.done():
             var tag = reader.read_tag()
             if tag[0] == 1:
@@ -93,19 +118,44 @@ struct HealthCheckResponse(Copyable, Defaultable, Movable, ProtoMessage):
     """Preserved unknown fields, re-emitted on encode."""
 
     def __init__(out self):
+        """Initializes all fields to their proto3 defaults."""
         self.status = ServingStatus.UNKNOWN
         self._unknown = List[Byte]()
 
     def __init__(out self, status: Int):
+        """Sets the serving status.
+
+        Args:
+            status: A `ServingStatus` wire number.
+        """
         self.status = status
         self._unknown = List[Byte]()
 
     def encode_to(self, mut writer: WireWriter):
+        """Appends the wire-format bytes to the writer.
+
+        Fields set to their proto3 default are omitted; preserved
+        unknown fields are re-emitted at the end.
+
+        Args:
+            writer: Destination wire-format writer.
+        """
         if self.status != 0:
             writer.int32(1, Int32(self.status))
         writer.buf.extend(Span(self._unknown))
 
     def merge_from(mut self, mut reader: WireReader) raises:
+        """Merges fields decoded from the reader into this message.
+
+        Later singular values overwrite earlier ones, and unknown
+        fields are preserved.
+
+        Args:
+            reader: Source wire-format reader.
+
+        Raises:
+            If the input is not valid protobuf wire data.
+        """
         while not reader.done():
             var tag = reader.read_tag()
             if tag[0] == 1:
@@ -126,6 +176,12 @@ struct HealthCheckOutcome(Copyable, Movable):
     """Encoded `HealthCheckResponse`, empty on a non-OK status."""
 
     def __init__(out self, var grpc_status: Status, var payload: List[Byte]):
+        """Stores a Check status and the encoded response.
+
+        Args:
+            grpc_status: OK when `payload` is a Check response.
+            payload: Encoded `HealthCheckResponse`, or empty on error.
+        """
         self.grpc_status = grpc_status^
         self.payload = payload^
 
@@ -143,6 +199,11 @@ struct Health(Movable):
     """Map from service name to `ServingStatus`. Empty key is overall."""
 
     def __init__(out self) raises:
+        """Creates a registry whose overall status is SERVING.
+
+        Raises:
+            If the overall-status entry cannot be inserted.
+        """
         self._status = Dict[String, Int]()
         self._status[String("")] = ServingStatus.SERVING
 
