@@ -13,6 +13,6 @@ pixi run example-server          # terminal 1; prints the bound port
 pixi run example-client -- PORT  # terminal 2
 ```
 
-Unix sockets (`Server.unix` / `GrpcChannel.connect_unix`) and client
-certificates are documented in [src/grpc/README.md](../src/grpc/README.md),
-not in these example files.
+Unix sockets (`Server.unix` / `PollingServer.unix` /
+`GrpcChannel.connect_unix`) and client certificates are documented in
+[src/grpc/README.md](../src/grpc/README.md), not in these example files.

@@ -12,7 +12,9 @@ from grpc.polling_server import (
     _keepalive_remaining_ns,
     _merge_poll_remaining,
 )
+from h2 import H2_ALPN
 from net import PollEvent
+from tls import TLSContext
 
 
 def echo_bytes(
@@ -181,7 +183,9 @@ def test_config_and_registration() raises:
         keepalive_overflow.validate()
     except:
         raised = True
-    assert_true(raised, "keepalive interval must fit the Poller millisecond ABI")
+    assert_true(
+        raised, "keepalive interval must fit the Poller millisecond ABI"
+    )
 
     var tls_server = PollingServer.tls(
         "127.0.0.1",
@@ -193,6 +197,35 @@ def test_config_and_registration() raises:
         require_client_cert=True,
     )
     tls_server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
+
+    var unix_server = PollingServer.unix(
+        "/tmp/grpc-mojo-polling-unused.sock",
+        config=config,
+    )
+    assert_true(unix_server._unix_path)
+    assert_equal(
+        unix_server._unix_path.value(),
+        "/tmp/grpc-mojo-polling-unused.sock",
+    )
+    assert_true(not unix_server._unix_remove_existing)
+    assert_true(not unix_server._tls_context)
+    unix_server.register_unary_bytes[echo_bytes]("/probe.Probe/Echo")
+
+    var unix_tls = PollingServer.unix(
+        "/tmp/grpc-mojo-polling-unused.sock",
+        config=config,
+    )
+    unix_tls._tls_context = TLSContext.server(
+        "build/certs/server.pem",
+        "build/certs/server.key",
+        alpn=[String(H2_ALPN)],
+    )
+    raised = False
+    try:
+        unix_tls.serve()
+    except e:
+        raised = "does not support TLS over Unix" in String(e)
+    assert_true(raised, "PollingServer must refuse TLS over Unix")
 
 
 def test_duplicate_poll_events_coalesce() raises:
