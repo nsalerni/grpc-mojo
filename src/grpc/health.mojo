@@ -168,7 +168,7 @@ struct HealthCheckResponse(Copyable, Defaultable, Movable, ProtoMessage):
 
 
 struct HealthCheckOutcome(Copyable, Movable):
-    """gRPC status plus serialized Check response bytes."""
+    """Status plus serialized Check response bytes."""
 
     var grpc_status: Status
     """OK when `payload` is a Check response; NOT_FOUND for unknown names."""
@@ -213,6 +213,9 @@ struct Health(Movable):
         Args:
             service: Service name; empty selects overall status.
             status: A `ServingStatus` wire number.
+
+        Raises:
+            If the status map cannot store the name.
         """
         self._status[String(service)] = status
 
@@ -224,6 +227,9 @@ struct Health(Movable):
 
         Returns:
             The `ServingStatus` wire number, or None when unset.
+
+        Raises:
+            If the status map lookup fails.
         """
         var key = String(service)
         if key in self._status:
@@ -240,6 +246,9 @@ struct Health(Movable):
 
         Returns:
             OK plus a serialized response, or NOT_FOUND with empty payload.
+
+        Raises:
+            If the registry lookup or response encode fails.
         """
         var found = self.status(request.service)
         if not found:
