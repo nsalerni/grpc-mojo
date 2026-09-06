@@ -27,5 +27,7 @@ The project has not had an external security review. Remaining work is in
 - Health Watch, gzip, and concurrent handlers stay unimplemented; they
   are blocked on Mojo threads or a 1.0-compatible zlib, not silent skips
   on the wire (Watch is UNIMPLEMENTED, compressed messages are rejected).
-- Unix sockets are plaintext. Use TLS when the path is not already a
-  trust boundary.
+- Unix sockets are plaintext only. `Server.unix()` and
+  `PollingServer.unix()` have no TLS path; the TLS APIs bind TCP host
+  and port pairs. Use a trusted filesystem boundary for Unix, or the
+  TLS-over-TCP APIs.
