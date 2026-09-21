@@ -1,6 +1,6 @@
 {
   "color": "brightgreen",
   "label": "gRPC interop",
-  "message": "h2c 24/24 | TLS 24/24 | Unix 24/24",
+  "message": "h2c 28/28 | TLS 28/28 | Unix 28/28",
   "schemaVersion": 1
 }

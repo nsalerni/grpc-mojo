@@ -1947,7 +1947,7 @@ SECTION_TITLES = {
     "grpc-polling-tls": ("`PollingServer` TLS with grpcio and CPython ssl peers",
                          "Independent grpcio processes and CPython ssl exercise non-blocking TLS handshakes, strict h2 ALPN, certificate verification, handshake-cap recovery, large responses, and output backpressure."),
     "grpc-official": ("Official gRPC interoperability vs grpcio",
-                      "All 12 canonical interoperability cases run with grpc-mojo in both client and server roles over h2c, verified TLS, and Unix domain sockets. These rows and the published badge come from the same machine-readable result document."),
+                      "All 14 canonical interoperability cases run with grpc-mojo in both client and server roles over h2c, verified TLS, and Unix domain sockets. These rows and the published badge come from the same machine-readable result document."),
     "packaging": ("Extraction isolation",
                   "Each package is staged into a scratch directory with only its declared dependencies (docs/ARCHITECTURE.md), then compiled and executed there. A package that reaches outside its dependency set fails this check. This is the mechanical proof behind independent open-sourcing."),
     "units": ("Spec-vector unit suites",
@@ -2117,7 +2117,7 @@ def write_html_report():
 
     h.append('<section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>')
     gaps = [
-        ("Compression", "mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Published mojo-zlib depends on nightly Mojo, not 1.0. Compressed messages are rejected, never mis-decoded."),
+        ("Compression", "gzip ships via a zlib C shim (PRIMITIVES.md #4). Unknown encodings are UNIMPLEMENTED. A 1.0-compatible mojo-zlib remains a partner goal so the shim can be dropped."),
         ("Concurrency", "PollingServer overlaps bounded h2c or TLS connection I/O; handlers remain serialized. Streaming handlers run to completion on the poll thread (PRIMITIVES.md #7)."),
         ("Control plane", "Keepalive PINGs on the blocking Server wait on Mojo threads or a public async runtime. PollingServer.request_stop() sends GOAWAY and drains on the event-loop thread. Configurable HTTP/2 initial_window_size already ships."),
         ("hpack value encoding", "header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata)."),
@@ -2177,7 +2177,7 @@ def write_report():
         "",
         "## Known gaps (tracked, not silent)",
         "",
-        "- **Compression**: `mojo-zlib` exists, but `grpc-encoding: gzip` integration remains pending (docs/PRIMITIVES.md item 4). Published `mojo-zlib` depends on nightly Mojo, not 1.0. Compressed messages are rejected, not mis-decoded.",
+        "- **Compression**: gzip ships via a zlib C shim (docs/PRIMITIVES.md item 4). Unknown encodings are UNIMPLEMENTED. A 1.0-compatible mojo-zlib remains a partner goal so the shim can be dropped.",
         "- **Concurrency**: `PollingServer` overlaps bounded h2c or TLS connection I/O; handlers remain serialized until Mojo exposes threads/async (PRIMITIVES.md item 7). Streaming handlers run to completion on the poll thread.",
         "- **Control plane**: keepalive PINGs on the blocking `Server` wait on Mojo threads or a public async runtime. `PollingServer.request_stop()` sends GOAWAY and drains on the event-loop thread. Configurable HTTP/2 `initial_window_size` already ships.",
         "",

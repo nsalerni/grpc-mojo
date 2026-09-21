@@ -24,6 +24,8 @@ from grpc import (
     encode_bin_value,
     encode_timeout,
     frame_message,
+    gzip_compress,
+    gzip_decompress,
     http_status_to_grpc,
     is_binary_key,
     is_valid_metadata_key,
@@ -240,6 +242,16 @@ def test_frame_compressed_flag() raises:
     assert_equal(to_hex(framed), "0100000001aa")
 
 
+def test_gzip_roundtrip() raises:
+    var payload: List[Byte] = [0x00, 0x01, 0x02, 0xFF]
+    var gz = gzip_compress(Span(payload))
+    var out = gzip_decompress(Span(gz), max_size=64)
+    assert_equal(to_hex(out), "000102ff")
+    var empty = gzip_compress(Span(List[Byte]()))
+    var empty_out = gzip_decompress(Span(empty), max_size=1)
+    assert_equal(len(empty_out), 0)
+
+
 # --- framing error paths over a real connection ---
 
 
@@ -302,12 +314,29 @@ def test_recv_message_errors() raises:
     var bad_flag: List[Byte] = [2, 0, 0, 0, 0]
     assert_true("invalid compressed flag" in recv_framing_error(bad_flag, True))
 
-    # Compressed-Flag set: no codecs are implemented.
+    # Compressed-Flag set with a payload that is not gzip.
     var compressed = frame_message("abc".as_bytes(), compressed=True)
     assert_true(
-        "compressed messages not supported"
-        in recv_framing_error(compressed, True)
+        "gzip decompress failed" in recv_framing_error(compressed, True)
     )
+
+    # Valid gzip payload with Compressed-Flag 1 decompresses.
+    var plain: List[Byte] = [0x41, 0x42, 0x43]
+    var gz = gzip_compress(Span(plain))
+    var gzip_framed = frame_message(Span(gz), compressed=True)
+    var rig = make_raw_rig()
+    var sid = rig.channel.start_call("/x/Y", Metadata())
+    rig.channel.send_request_bytes(sid, "r".as_bytes(), last=True)
+    rig.pump_until_headers(sid)
+    rig.send_response_headers(sid)
+    rig.server_conn.send_data(sid, Span(gzip_framed), end_stream=True)
+    rig.channel.conn.wait_headers(sid)
+    var got = rig.channel.recv_response_bytes(sid)
+    assert_true(Bool(got), "gzip response should decode")
+    assert_equal(to_hex(got.value()), "414243")
+    assert_true(rig.channel.last_recv_compressed)
+    rig.channel.close()
+    rig.server_conn.close()
 
     # Declared length above the 4 MiB default cap (no body needed).
     var oversize: List[Byte] = [0, 0x00, 0x50, 0x00, 0x00]  # 5 MiB
@@ -324,6 +353,42 @@ def test_recv_message_errors() raises:
     assert_true(
         "truncated message body" in recv_framing_error(short_body, True)
     )
+
+
+def gzip_echo_handler(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    ctx.compress_response = True
+    return EchoResponse(message=req.message.copy())
+
+
+def test_gzip_unary_e2e() raises:
+    var server = Server("127.0.0.1", 0)
+    server.register_unary[gzip_echo_handler]("/echo.Echo/Say")
+    var listener = TCPListener("127.0.0.1", 0)
+    var channel = GrpcChannel.connect("127.0.0.1", listener.local_port)
+    var server_tcp = listener.accept()
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
+    listener.close()
+    var handled = List[UInt32]()
+    var req = EchoRequest(message=String("gzip-me"))
+    var sid = channel.start_call("/echo.Echo/Say", Metadata(), encoding="gzip")
+    channel.send_request_bytes(sid, Span(encode(req)), last=True, compress=True)
+    while True:
+        server_conn.process_next_frame()
+        if server.dispatch_ready(server_conn, handled) > 0:
+            break
+    channel.conn.wait_headers(sid)
+    var msg = channel.recv_response_bytes(sid)
+    var result = channel.finish(sid)
+    assert_true(result.status.is_ok(), result.status.message)
+    assert_true(Bool(msg), "gzip e2e must return a body")
+    assert_true(channel.last_recv_compressed, "response Compressed-Flag is 1")
+    var resp = decode[EchoResponse](Span(msg.value()))
+    assert_equal(resp.message, String("gzip-me"))
+    channel.close()
+    server_conn.close()
 
 
 # --- protocol abuse against the real Server dispatch ---
@@ -911,7 +976,9 @@ def main() raises:
     test_status_edges()
     test_percent_boundaries()
     test_frame_compressed_flag()
+    test_gzip_roundtrip()
     test_recv_message_errors()
+    test_gzip_unary_e2e()
     test_server_max_message_size()
     test_channel_max_message_size()
     test_server_initial_window_size()

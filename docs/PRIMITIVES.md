@@ -54,19 +54,22 @@ for verified HTTP/2 and gRPC connections, and require the `h2` ALPN token.
 **Verification**: CPython `ssl`, h2spec TLS mode, and grpcio all exercise the
 implementation across client and server roles in CI.
 
-## 4. Compression codecs (gzip/deflate): **integration pending**
+## 4. Compression codecs (gzip): **shipped (zlib shim)**
 
-**Available package**:
-[`mojo-zlib`](https://github.com/gabrieldemarmiesse/mojo-zlib) provides Mojo
-bindings to zlib. Mojo's stdlib still has no zlib/deflate API.
+**What we built**: RFC 1952 gzip in `src/grpc/gzip.mojo`, linked through
+the same C shim as PollingServer stop signals (`-lz`). Clients advertise
+`grpc-accept-encoding: gzip`. `start_call(..., encoding="gzip")` plus
+`send_request_bytes(..., compress=True)` send compressed requests.
+Servers decompress Compressed-Flag 1 and compress responses when
+`ServerContext.compress_response` is set. Official interop covers
+`client_compressed_unary` and `server_compressed_unary`.
 
-**Remaining work**: integrate a gzip codec with grpc-mojo's existing compressed
-flag and `grpc-accept-encoding` negotiation, then verify it against grpcio. Use
-that integration experience to inform a `std.compress` proposal upstream.
+**Partner**: [`mojo-zlib`](https://github.com/gabrieldemarmiesse/mojo-zlib)
+is the right long-term codec package once it retargets Mojo 1.0. This
+shim is a 1.0-compatible stand-in, not a competing zlib API.
 
-**Blocked**: published `mojo-zlib` 0.1.7 depends on nightly Mojo, not
-`mojo >=1.0.0,<2`. grpc-mojo stays on stable 1.0, so gzip waits on a
-1.0-compatible codec. Compressed messages are rejected, not mis-decoded.
+**Upstream path**: that integration experience informs a `std.compress`
+proposal.
 
 ## 5. Big-endian byte order helpers — **small stdlib PR**
 
@@ -115,7 +118,7 @@ stdlib forum alongside the async RFC.
 | 5 | BE/LE int↔bytes | modular/modular PR | S | now |
 | 6 | base64 variants | modular/modular PR | S | now |
 | 1 | `std.net` sockets | RFC thread + community package → stdlib PR | M | after v0 ships |
-| 4 | gzip integration | 1.0-compatible zlib package, then `std.compress` proposal | M | blocked: mojo-zlib is nightly-only |
+| 4 | gzip integration | zlib shim now; `std.compress` after mojo-zlib 1.0 | M | shipped locally; partner retarget pending |
 | 2 | reactor | community package (`mojo-reactor`) | L | after Modular async stabilizes |
 | 7 | threads | forum RFC + `mojo-threads` package | M | next: unblocks concurrent server |
 | 3 | TLS | community package (`mojo-tls`) | complete | shipped |

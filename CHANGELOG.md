@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.2.7 - 2026-09-21
+
+- Add gzip (`grpc-encoding` / `grpc-accept-encoding`) via zlib in the
+  stop-signal shim. Compressed messages decompress; responses compress
+  when `ServerContext.compress_response` is set. Official interop cases
+  `client_compressed_unary` and `server_compressed_unary` are included.
+- Add gRPC server reflection (`grpc.reflection.v1` and `v1alpha`) with
+  static `FileDescriptorProto` bytes from `protoc-gen-mojo`. Regenerated
+  `echo_pb.mojo` includes `add_echo_pb_file_descriptor`.
+- Harden `PollingServer` stop-signal handling and document that Unix
+  listeners have no TLS path.
+- Pin source and conda lower bounds to mojo-net 0.2.7, mojo-http2 0.2.9,
+  mojo-tls 0.3.3, and protomojo 0.4.3. `user-agent` is `grpc-mojo/0.2.7`.
+
+## 0.2.6 - 2026-09-05
+
 - Added `PollingServer.unix(path, *, remove_existing=)` so the Poller
   server can bind a Unix domain socket. TLS over Unix is refused. An
   existing socket file is refused unless `remove_existing=True`, matching

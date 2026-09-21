@@ -17,7 +17,7 @@ length-prefixed message framing, `grpc-timeout` deadlines, custom metadata
 messages, and the `grpc-status-details-bin` rich error model. All four RPC
 kinds are supported: unary, server streaming, client streaming, and
 bidirectional streaming. Conformance is verified against reference
-implementations: the official gRPC interop suite passes 72/72 cases against
+implementations: the official gRPC interop suite passes 84/84 cases against
 grpcio across both roles and all three transports, the h2 layer passes h2spec
 146/146, and the proto layer passes 1476/1476 proto3 binary and JSON cases in
 Google's protobuf conformance suite.
@@ -79,6 +79,7 @@ from .framing import (
     recv_message,
     send_message,
 )
+from .gzip import gzip_compress, gzip_decompress
 from .health import (
     HEALTH_CHECK_PATH,
     HEALTH_WATCH_PATH,
@@ -95,6 +96,14 @@ from .metadata import (
     is_valid_metadata_key,
 )
 from .polling_server import PollingServer, PollingServerConfig
+from .reflection import (
+    REFLECTION_V1_PATH,
+    REFLECTION_V1ALPHA_PATH,
+    ReflectionRegistry,
+    ServerReflectionRequest,
+    ServerReflectionResponse,
+    is_reflection_path,
+)
 from .server import (
     MethodKind,
     RawHandler,

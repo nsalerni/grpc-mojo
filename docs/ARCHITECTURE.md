@@ -62,7 +62,8 @@ cross-thread stop.
 
 ## Out of scope for v0
 
-Compression (`grpc-encoding: gzip`), retries, service config, load balancing,
-channelz, and reflection. Health **Check** is implemented; **Watch** returns
-UNIMPLEMENTED because status changes during a live stream need threads or
-async. Tracked in [ROADMAP.md](ROADMAP.md).
+Retries, service config, load balancing, and channelz stay
+out of scope. Gzip and server reflection ship. Health **Check** is
+implemented; **Watch** returns UNIMPLEMENTED because status changes
+during a live stream need threads or async. Tracked in
+[ROADMAP.md](ROADMAP.md).

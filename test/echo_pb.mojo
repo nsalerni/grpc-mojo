@@ -30,6 +30,7 @@ from grpc import (
     ServerCall,
     ServerContext,
     ServerStreamingCall,
+    ReflectionRegistry,
 )
 
 
@@ -385,3 +386,56 @@ def add_echo_polling_service[
     server.register_server_streaming[split](ECHO_SPLIT_PATH)
     server.register_client_streaming[join](ECHO_JOIN_PATH)
     server.register_bidi[chat](ECHO_CHAT_PATH)
+
+
+def echo_pb_file_descriptor_proto() -> List[Byte]:
+    """Serialized `FileDescriptorProto` for `echo.proto`."""
+    var out: List[Byte] = [
+        10, 10, 101, 99, 104, 111, 46, 112, 114, 111, 116, 111, 18, 4, 101, 99,
+        104, 111, 34, 39, 10, 11, 69, 99, 104, 111, 82, 101, 113, 117, 101, 115,
+        116, 18, 24, 10, 7, 109, 101, 115, 115, 97, 103, 101, 24, 1, 32, 1,
+        40, 9, 82, 7, 109, 101, 115, 115, 97, 103, 101, 34, 40, 10, 12, 69,
+        99, 104, 111, 82, 101, 115, 112, 111, 110, 115, 101, 18, 24, 10, 7, 109,
+        101, 115, 115, 97, 103, 101, 24, 1, 32, 1, 40, 9, 82, 7, 109, 101,
+        115, 115, 97, 103, 101, 50, 202, 1, 10, 4, 69, 99, 104, 111, 18, 44,
+        10, 3, 83, 97, 121, 18, 17, 46, 101, 99, 104, 111, 46, 69, 99, 104,
+        111, 82, 101, 113, 117, 101, 115, 116, 26, 18, 46, 101, 99, 104, 111, 46,
+        69, 99, 104, 111, 82, 101, 115, 112, 111, 110, 115, 101, 18, 48, 10, 5,
+        83, 112, 108, 105, 116, 18, 17, 46, 101, 99, 104, 111, 46, 69, 99, 104,
+        111, 82, 101, 113, 117, 101, 115, 116, 26, 18, 46, 101, 99, 104, 111, 46,
+        69, 99, 104, 111, 82, 101, 115, 112, 111, 110, 115, 101, 48, 1, 18, 47,
+        10, 4, 74, 111, 105, 110, 18, 17, 46, 101, 99, 104, 111, 46, 69, 99,
+        104, 111, 82, 101, 113, 117, 101, 115, 116, 26, 18, 46, 101, 99, 104, 111,
+        46, 69, 99, 104, 111, 82, 101, 115, 112, 111, 110, 115, 101, 40, 1, 18,
+        49, 10, 4, 67, 104, 97, 116, 18, 17, 46, 101, 99, 104, 111, 46, 69,
+        99, 104, 111, 82, 101, 113, 117, 101, 115, 116, 26, 18, 46, 101, 99, 104,
+        111, 46, 69, 99, 104, 111, 82, 101, 115, 112, 111, 110, 115, 101, 40, 1,
+        48, 1, 98, 6, 112, 114, 111, 116, 111, 51,
+    ]
+    return out^
+
+def echo_pb_proto_name() -> String:
+    """Filename of `echo.proto` for gRPC reflection."""
+    return String("echo.proto")
+
+def echo_pb_reflection_symbols() -> List[String]:
+    """Fully-qualified symbols declared in `echo.proto`."""
+    var symbols: List[String] = [
+        String("echo.EchoRequest"),
+        String("echo.EchoResponse"),
+        String("echo.Echo"),
+        String("echo.Echo.Say"),
+        String("echo.Echo.Split"),
+        String("echo.Echo.Join"),
+        String("echo.Echo.Chat"),
+    ]
+    return symbols^
+
+def add_echo_pb_file_descriptor(mut registry: ReflectionRegistry) raises:
+    """Registers `echo.proto` with a reflection registry."""
+    registry.add_file(
+        echo_pb_proto_name(),
+        echo_pb_file_descriptor_proto(),
+        echo_pb_reflection_symbols(),
+    )
+    registry.add_service(String("echo.Echo"))

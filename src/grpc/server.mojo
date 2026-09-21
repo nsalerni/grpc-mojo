@@ -43,11 +43,20 @@ from tls import PeerCertificate, TLSContext
 
 from .framing import (
     DEFAULT_MAX_RECV_MESSAGE_SIZE,
-    recv_message,
+    recv_message_flag,
     send_message,
 )
+from .gzip import encoding_is_supported
 from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
+from .reflection import (
+    REFLECTION_V1_PATH,
+    REFLECTION_V1ALPHA_PATH,
+    ReflectionRegistry,
+    ServerReflectionRequest,
+    is_reflection_path,
+    service_name_from_path,
+)
 from .status import Status, StatusCode, percent_encode_message
 from .timeout import decode_timeout
 from .transport import GrpcTransport
@@ -97,6 +106,11 @@ struct ServerContext(Movable):
     var stop_server: Bool
     """When True after a PollingServer handler returns, `serve()` begins
     graceful shutdown. Ignored by the blocking `Server`."""
+    var request_compressed: Bool
+    """True when the most recent received request message was gzip'd."""
+    var compress_response: Bool
+    """When True, response messages are gzip-compressed and the call
+    advertises `grpc-encoding: gzip`."""
 
     def __init__(out self, peer_certificate: Optional[PeerCertificate] = None):
         """Constructs an empty context; dispatch fills the request fields.
@@ -115,6 +129,8 @@ struct ServerContext(Movable):
         self.response_trailers = Metadata()
         self.abort_status = None
         self.stop_server = False
+        self.request_compressed = False
+        self.compress_response = False
 
     def abort(mut self, code: Int, var message: String):
         """Ends the call with a specific status once the handler returns.
@@ -179,6 +195,8 @@ struct ServerCall(Movable):
     """Maximum serialized request or response message size for this call."""
     var _oversized_message: Bool
     """True when recv or send hit the configured message size cap."""
+    var last_message_compressed: Bool
+    """True when the most recent `recv_bytes` saw Compressed-Flag 1."""
 
     def client_cancelled(mut self) -> Bool:
         """Reports whether the client reset the stream (RST_STREAM).
@@ -206,9 +224,15 @@ struct ServerCall(Movable):
             `max_message_size`.
         """
         try:
-            return recv_message(
-                self._conn[], self.sid, max_size=self.max_message_size
+            var compressed = False
+            var msg = recv_message_flag(
+                self._conn[],
+                self.sid,
+                max_size=self.max_message_size,
+                compressed=compressed,
             )
+            self.last_message_compressed = compressed
+            return msg^
         except e:
             if String(e) == "grpc: message exceeds max size":
                 self._oversized_message = True
@@ -231,15 +255,19 @@ struct ServerCall(Movable):
             return decode[M](Span(raw.value()))
         return None
 
-    def send_headers_once(mut self, ctx: ServerContext) raises:
+    def send_headers_once(
+        mut self, ctx: ServerContext, *, compress: Bool = False
+    ) raises:
         """Sends the initial response HEADERS if not already sent.
 
-        Emits `:status 200`, the gRPC content type, and the handler's
+        Emits `:status 200`, the gRPC content type, `grpc-accept-encoding:
+        gzip`, optional `grpc-encoding: gzip`, and the handler's
         `ctx.response_metadata`. Idempotent; the message send paths call it
         implicitly, so handlers rarely need to.
 
         Args:
             ctx: The call context supplying response metadata.
+            compress: When True, advertise `grpc-encoding: gzip`.
 
         Raises:
             On connection I/O or HTTP/2 protocol errors.
@@ -255,11 +283,26 @@ struct ServerCall(Movable):
                 value=String("application/grpc+proto"),
             )
         )
+        headers.append(
+            HeaderField(
+                name=String("grpc-accept-encoding"), value=String("gzip")
+            )
+        )
+        if compress or ctx.compress_response:
+            headers.append(
+                HeaderField(name=String("grpc-encoding"), value=String("gzip"))
+            )
         for m in ctx.response_metadata.entries:
             headers.append(m.copy())
         self._conn[].send_headers(self.sid, Span(headers), end_stream=False)
 
-    def send_bytes(mut self, ctx: ServerContext, payload: Span[Byte, _]) raises:
+    def send_bytes(
+        mut self,
+        ctx: ServerContext,
+        payload: Span[Byte, _],
+        *,
+        compress: Bool = False,
+    ) raises:
         """Sends one serialized response message.
 
         Sends the initial response headers first when still pending.
@@ -267,6 +310,8 @@ struct ServerCall(Movable):
         Args:
             ctx: The call context supplying response metadata.
             payload: The serialized message bytes.
+            compress: When True, gzip-compress this message. Also
+                implied by `ctx.compress_response`.
 
         Raises:
             If `payload` exceeds `max_message_size`, or on connection I/O
@@ -275,8 +320,15 @@ struct ServerCall(Movable):
         if len(payload) > self.max_message_size:
             self._oversized_message = True
             raise Error("grpc: message exceeds max size")
-        self.send_headers_once(ctx)
-        send_message(self._conn[], self.sid, payload, end_stream=False)
+        var use_gzip = compress or ctx.compress_response
+        self.send_headers_once(ctx, compress=use_gzip)
+        send_message(
+            self._conn[],
+            self.sid,
+            payload,
+            end_stream=False,
+            compress=use_gzip,
+        )
 
     def send[M: ProtoMessage](mut self, ctx: ServerContext, msg: M) raises:
         """Encodes and sends one typed response message.
@@ -402,7 +454,7 @@ message bytes in, response message bytes out."""
 
 
 @fieldwise_init
-struct Route(Movable):
+struct Route(Copyable, Movable):
     """One routing-table entry: a method kind and its wrapped handler."""
 
     var kind: Int
@@ -448,6 +500,8 @@ struct Server(Movable):
     """Whether a Unix listener may remove an existing socket file."""
     var health: Optional[Health]
     """Health registry for Check; None leaves the method UNIMPLEMENTED."""
+    var reflection: Optional[ReflectionRegistry]
+    """File-descriptor set for server reflection; None leaves it UNIMPLEMENTED."""
     var max_message_size: Int
     """Maximum serialized request or response size, default 4 MiB."""
     var initial_window_size: UInt32
@@ -469,6 +523,7 @@ struct Server(Movable):
         self._unix_path = None
         self._unix_remove_existing = False
         self.health = None
+        self.reflection = None
         self.max_message_size = DEFAULT_MAX_RECV_MESSAGE_SIZE
         self.initial_window_size = DEFAULT_WINDOW_SIZE
 
@@ -590,6 +645,7 @@ struct Server(Movable):
                     ctx,
                 )
                 return
+            ctx.request_compressed = call.last_message_compressed
             var response = handler(msg.take(), ctx)
             if ctx.abort_status:
                 call.finish(ctx.abort_status.value().copy(), ctx)
@@ -645,6 +701,19 @@ struct Server(Movable):
         """
         self.health = registry^
 
+    def add_reflection(mut self, var registry: ReflectionRegistry):
+        """Registers gRPC server reflection on v1 and v1alpha.
+
+        `grpcurl` and `grpcui` use `ServerReflectionInfo`. File descriptors
+        come from codegen (`*_file_descriptor_proto`) plus any files added
+        with `ReflectionRegistry.add_file`.
+
+        Args:
+            registry: Descriptor set. Service names from this server's
+                routes are merged in at call time.
+        """
+        self.reflection = registry^
+
     def register_server_streaming[
         Req: ProtoMessage,
         //,
@@ -683,6 +752,7 @@ struct Server(Movable):
                 )
                 return
             var req = msg.take()
+            ctx.request_compressed = call.last_message_compressed
             handler(req, ctx, call)
             if ctx.abort_status:
                 call.finish(ctx.abort_status.value().copy(), ctx)
@@ -771,6 +841,7 @@ struct Server(Movable):
             call_start_ns=Int64(monotonic()),
             max_message_size=self.max_message_size,
             _oversized_message=False,
+            last_message_compressed=False,
         )
 
         # Content-type gate (spec: 415 for non-gRPC).
@@ -806,9 +877,32 @@ struct Server(Movable):
                 )
                 return
 
+        var encoding = _find_header(Span(headers), "grpc-encoding")
+        if encoding and not encoding_is_supported(encoding.value()):
+            call.finish(
+                Status(
+                    code=StatusCode.UNIMPLEMENTED,
+                    message=String("grpc: compression algorithm not supported"),
+                ),
+                ctx,
+            )
+            return
+
         if self.health and ctx.path == HEALTH_CHECK_PATH:
             try:
                 self._serve_health_check(call, ctx)
+            except e:
+                if not call.trailers_sent:
+                    var message = String(e)
+                    var code = StatusCode.UNKNOWN
+                    if call._oversized_message:
+                        code = StatusCode.RESOURCE_EXHAUSTED
+                    call.finish(Status(code=code, message=message), ctx)
+            return
+
+        if self.reflection and is_reflection_path(ctx.path):
+            try:
+                self._serve_reflection(call, ctx)
             except e:
                 if not call.trailers_sent:
                     var message = String(e)
@@ -866,6 +960,40 @@ struct Server(Movable):
             call.finish(outcome.grpc_status.copy(), ctx)
             return
         call.send_bytes(ctx, Span(outcome.payload))
+        call.finish_ok(ctx)
+
+    def _listed_services(self) raises -> List[String]:
+        var names = Dict[String, Bool]()
+        if self.health:
+            names[String("grpc.health.v1.Health")] = True
+        if self.reflection:
+            names[String("grpc.reflection.v1.ServerReflection")] = True
+            names[String("grpc.reflection.v1alpha.ServerReflection")] = True
+        for path in self.routes:
+            var svc = service_name_from_path(path)
+            if svc:
+                names[svc.value()] = True
+        if self.reflection:
+            for name in self.reflection.value().services():
+                names[name.copy()] = True
+        var out = List[String]()
+        for name in names:
+            out.append(name.copy())
+        return out^
+
+    def _serve_reflection(
+        mut self, mut call: ServerCall, mut ctx: ServerContext
+    ) raises:
+        while True:
+            var msg = call.recv[ServerReflectionRequest]()
+            if call.client_cancelled():
+                call.trailers_sent = True
+                return
+            if not msg:
+                break
+            var services = self._listed_services()
+            var resp = self.reflection.value().respond(msg.value(), services)
+            call.send(ctx, resp)
         call.finish_ok(ctx)
 
     def dispatch_ready(

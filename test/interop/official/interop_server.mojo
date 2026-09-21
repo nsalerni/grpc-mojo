@@ -17,7 +17,8 @@ from messages_pb import (
 from std.time import sleep
 from std.sys import argv
 
-from grpc import Server, ServerCall, ServerContext
+from grpc import Server, ServerCall, ServerContext, StatusCode
+from proto import encode
 
 
 def zeros(n: Int) -> List[Byte]:
@@ -46,6 +47,15 @@ def unary_call(
     req: SimpleRequest, mut ctx: ServerContext
 ) raises -> SimpleResponse:
     echo_metadata(ctx)
+    if req.expect_compressed:
+        if req.expect_compressed.value().value != ctx.request_compressed:
+            ctx.abort(
+                StatusCode.INVALID_ARGUMENT,
+                String("invalid compression expected"),
+            )
+            return SimpleResponse()
+    if req.response_compressed:
+        ctx.compress_response = req.response_compressed.value().value
     if req.response_status:
         ctx.abort(
             Int(req.response_status.value().code),
@@ -67,8 +77,16 @@ def streaming_input(
         var msg = call.recv[StreamingInputCallRequest]()
         if not msg:
             break
-        if msg.value().payload:
-            total += len(msg.value().payload.value().body)
+        var req = msg.take()
+        if req.expect_compressed:
+            if req.expect_compressed.value().value != call.last_message_compressed:
+                ctx.abort(
+                    StatusCode.INVALID_ARGUMENT,
+                    String("invalid compression expected"),
+                )
+                return StreamingInputCallResponse()
+        if req.payload:
+            total += len(req.payload.value().body)
     var resp = StreamingInputCallResponse()
     resp.aggregated_payload_size = Int32(total)
     return resp^
@@ -80,13 +98,20 @@ def streaming_output(
     mut call: ServerCall,
 ) raises:
     for param in req.response_parameters:
+        if param.compressed and param.compressed.value().value:
+            ctx.compress_response = True
+            break
+    for param in req.response_parameters:
         if param.interval_us > 0:
             sleep(Float64(param.interval_us) / 1_000_000.0)
         var resp = StreamingOutputCallResponse()
         var p = Payload()
         p.body = zeros(Int(param.size))
         resp.payload = p^
-        call.send[StreamingOutputCallResponse](ctx, resp)
+        var compress = False
+        if param.compressed:
+            compress = param.compressed.value().value
+        call.send_bytes(ctx, Span(encode(resp)), compress=compress)
 
 
 def full_duplex(mut ctx: ServerContext, mut call: ServerCall) raises:

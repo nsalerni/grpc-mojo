@@ -10,6 +10,7 @@ from std.sys import argv
 
 from empty_pb import Empty
 from messages_pb import (
+    BoolValue,
     EchoStatus,
     Payload,
     ResponseParameters,
@@ -269,6 +270,49 @@ def case_cancel_after_begin(mut channel: GrpcChannel) raises:
     _ = resp^
 
 
+def bool_value(value: Bool) -> BoolValue:
+    var flag = BoolValue()
+    flag.value = value
+    return flag^
+
+
+def case_client_compressed_unary(mut channel: GrpcChannel) raises:
+    # Probe: uncompressed request, expect_compressed=false.
+    var probe = simple_request(314159, 271828)
+    probe.expect_compressed = bool_value(False)
+    var sid = channel.start_call(UNARY_PATH, Metadata())
+    channel.send_request_bytes(sid, Span(encode(probe)), last=True)
+    channel.conn.wait_headers(sid)
+    var probe_msg = channel.recv_response_bytes(sid)
+    var probe_result = channel.finish(sid)
+    expect(probe_result.status.is_ok(), "uncompressed probe succeeded")
+    expect(Bool(probe_msg), "probe payload present")
+
+    var req = simple_request(314159, 271828)
+    req.expect_compressed = bool_value(True)
+    sid = channel.start_call(UNARY_PATH, Metadata(), encoding="gzip")
+    channel.send_request_bytes(
+        sid, Span(encode(req)), last=True, compress=True
+    )
+    channel.conn.wait_headers(sid)
+    var msg = channel.recv_response_bytes(sid)
+    var result = channel.finish(sid)
+    expect(result.status.is_ok(), "compressed unary succeeded")
+    expect(Bool(msg), "compressed unary payload present")
+    var resp = decode[SimpleResponse](Span(msg.value()))
+    expect(Bool(resp.payload), "payload present")
+    expect(len(resp.payload.value().body) == 314159, "payload is 314159 bytes")
+
+
+def case_server_compressed_unary(mut channel: GrpcChannel) raises:
+    var req = simple_request(314159, 271828)
+    req.response_compressed = bool_value(True)
+    var resp = channel.unary[SimpleRequest, SimpleResponse](UNARY_PATH, req)
+    expect(Bool(resp.payload), "payload present")
+    expect(len(resp.payload.value().body) == 314159, "payload is 314159 bytes")
+    expect(channel.last_recv_compressed, "response was gzip compressed")
+
+
 def main() raises:
     var args = argv()
     var channel: GrpcChannel
@@ -314,6 +358,10 @@ def main() raises:
         case_timeout_on_sleeping_server(channel)
     elif case_name == "cancel_after_begin":
         case_cancel_after_begin(channel)
+    elif case_name == "client_compressed_unary":
+        case_client_compressed_unary(channel)
+    elif case_name == "server_compressed_unary":
+        case_server_compressed_unary(channel)
     else:
         raise Error("unknown case: " + String(case_name))
     print("CASE-OK ", case_name, sep="")

@@ -11,7 +11,9 @@
     "special_status_message",
     "unimplemented_method",
     "timeout_on_sleeping_server",
-    "cancel_after_begin"
+    "cancel_after_begin",
+    "client_compressed_unary",
+    "server_compressed_unary"
   ],
   "results": [
     {
@@ -75,6 +77,16 @@
       "passed": true
     },
     {
+      "case": "client_compressed_unary",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
+      "direction": "mojo-client-h2c",
+      "passed": true
+    },
+    {
       "case": "empty_unary",
       "direction": "mojo-client-tls",
       "passed": true
@@ -135,6 +147,16 @@
       "passed": true
     },
     {
+      "case": "client_compressed_unary",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
+      "direction": "mojo-client-tls",
+      "passed": true
+    },
+    {
       "case": "empty_unary",
       "direction": "mojo-client-unix",
       "passed": true
@@ -195,6 +217,16 @@
       "passed": true
     },
     {
+      "case": "client_compressed_unary",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
+      "direction": "mojo-client-unix",
+      "passed": true
+    },
+    {
       "case": "empty_unary",
       "direction": "grpcio-client-h2c",
       "passed": true
@@ -255,6 +287,16 @@
       "passed": true
     },
     {
+      "case": "client_compressed_unary",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
+      "direction": "grpcio-client-h2c",
+      "passed": true
+    },
+    {
       "case": "empty_unary",
       "direction": "grpcio-client-tls",
       "passed": true
@@ -315,6 +357,16 @@
       "passed": true
     },
     {
+      "case": "client_compressed_unary",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
+      "direction": "grpcio-client-tls",
+      "passed": true
+    },
+    {
       "case": "empty_unary",
       "direction": "grpcio-client-unix",
       "passed": true
@@ -371,6 +423,16 @@
     },
     {
       "case": "cancel_after_begin",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "client_compressed_unary",
+      "direction": "grpcio-client-unix",
+      "passed": true
+    },
+    {
+      "case": "server_compressed_unary",
       "direction": "grpcio-client-unix",
       "passed": true
     }

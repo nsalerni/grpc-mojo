@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mojo networking and gRPC</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 44rem;
+           margin: 2rem auto; padding: 0 1.25rem; line-height: 1.5; }
+    h1, h2 { line-height: 1.2; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, monospace; }
+    pre { overflow: auto; padding: 0.85rem 1rem; border-radius: 6px;
+          background: color-mix(in srgb, CanvasText 8%, Canvas); }
+    a { color: inherit; }
+    .muted { opacity: 0.75; }
+    ul.stack { padding-left: 1.2rem; }
+  </style>
+</head>
+<body>
+  <p class="muted">Mojo 1.0 · Apache-2.0 · community stack</p>
+  <h1>Networking and gRPC for Mojo</h1>
+  <p>
+    Five packages that cover sockets, TLS, HTTP/2, protobuf, and gRPC.
+    Official gRPC interop <strong>84/84</strong>, h2spec <strong>146/146</strong>,
+    protobuf conformance <strong>1476/1476</strong>.
+  </p>
+
+  <h2>Install</h2>
+<pre><code>pixi init my-app &amp;&amp; cd my-app
+# pixi.toml channels:
+#   https://conda.modular.com/max
+#   https://repo.prefix.dev/modular-community
+#   conda-forge
+pixi add grpc-mojo   # or mojo-net / mojo-tls / mojo-http2 / protomojo
+</code></pre>
+
+  <h2>The stack</h2>
+  <ul class="stack">
+    <li><a href="https://github.com/nsalerni/mojo-net">mojo-net</a> — TCP, UDP, DNS, Unix sockets, poller</li>
+    <li><a href="https://github.com/nsalerni/mojo-tls">mojo-tls</a> — TLS 1.2/1.3 over libssl</li>
+    <li><a href="https://github.com/nsalerni/mojo-http2">mojo-http2</a> — HPACK and HTTP/2</li>
+    <li><a href="https://github.com/nsalerni/protomojo">protomojo</a> — proto3 binary, JSON, <code>protoc-gen-mojo</code></li>
+    <li><a href="https://github.com/nsalerni/grpc-mojo">grpc-mojo</a> — unary and streaming RPCs over h2c, TLS, Unix</li>
+  </ul>
+
+  <h2>Unary RPC</h2>
+  <p>
+    Generate stubs, serve, call. Full walkthrough:
+    <a href="docs/GETTING_STARTED.md">docs/GETTING_STARTED.md</a>.
+  </p>
+<pre><code>python3 -m grpc_tools.protoc -I. \
+  --plugin=protoc-gen-mojo=$(command -v protoc-gen-mojo) \
+  --mojo_out=. echo.proto
+</code></pre>
+
+  <h2>Limits to know</h2>
+  <p>
+    <code>PollingServer</code> overlaps connection I/O on one thread.
+    Handlers stay serial. A streaming handler stalls every other
+    connection until it returns. Scale-out is processes, not threads.
+  </p>
+
+  <p>
+    <a href="docs/COMPLIANCE.html">Compliance report</a> ·
+    <a href="https://github.com/nsalerni/grpc-mojo">Source</a>
+  </p>
+</body>
+</html>

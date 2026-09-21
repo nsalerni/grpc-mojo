@@ -25,10 +25,11 @@ is the live list.
   `read_exact` would drop a partial HTTP/2 frame on timeout and desync
   the parser. Keepalive stays on the Poller path
   (`PollingServerConfig.keepalive_interval_ns`).
-- **gRPC gzip.** Published `mojo-zlib` 0.1.7 depends on nightly Mojo, not
-  `mojo >=1.0.0,<2`. Compressed messages are rejected, not mis-decoded,
-  until a 1.0-compatible codec exists (or the community package retargets
-  stable).
+- **gRPC gzip.** Shipped via a zlib C shim in `libgrpcstop` (`-lz`).
+  Compressed-Flag 1 is gunzip'd; `grpc-accept-encoding: gzip` is
+  advertised. Partner work: retarget
+  [mojo-zlib](https://github.com/gabrieldemarmiesse/mojo-zlib) to Mojo 1.0
+  so this stack can drop the shim.
 - **Concurrent handlers.** No `std.thread` and no public async I/O
   runtime. `PollingServer` overlaps connection I/O; handler calls stay
   serial. Full-duplex bidi firehose stays recv-driven ping-pong.
@@ -43,11 +44,11 @@ is the live list.
 
 ### Process / access (not code)
 
-- Publishing conda packages to modular-community needs tokens and a
-  human publish step.
-- Protecting `main` with a branch ruleset is a GitHub org setting.
-- GitHub About fields (description, homepage, topics) are repository
-  settings, not files in the tree.
+- Publishing conda packages is a PR to
+  [modular/modular-community](https://github.com/modular/modular-community)
+  that bumps `context.version` and the git `rev`. `main` is already
+  protected (no delete, no force-push). GitHub About fields
+  (description, homepage, topics) are repository settings, not files.
 
 ---
 
@@ -107,8 +108,8 @@ ubuntu-24.04}` with pixi caching. The compliance report is generated and
 badged from that run.
 
 ### B2. Official gRPC interop test suite *(done)*
-The 12 canonical cases run in both roles over h2c, TLS, and Unix sockets
-against grpcio (`pixi run interop-official`): 72/72.
+The 14 canonical cases run in both roles over h2c, TLS, and Unix sockets
+against grpcio (`pixi run interop-official`): 84/84.
 
 ### B3. h2spec *(done)*
 [h2spec](https://github.com/summerwind/h2spec) is green: 146/146.
@@ -143,7 +144,7 @@ and a mojo-threads RFC before any thread package.
 | **mojo-http2** (`hpack` + `h2`) | [mojo-http2](https://github.com/nsalerni/mojo-http2) | RFC 9218 stream priority if a consumer needs it | HPACK and HTTP/2 for Mojo servers/clients generally |
 | **mojo-net** | [mojo-net](https://github.com/nsalerni/mojo-net) | none for the current socket/DNS/poller scope | Ends per-project libc socket bindings |
 | **mojo-tls** | [mojo-tls](https://github.com/nsalerni/mojo-tls) | TLS session resumption | TLS 1.2/1.3 with strict X.509, SNI, and ALPN |
-| **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | 1.0-compatible retarget, then gRPC gzip | Enables pending `grpc-encoding: gzip` |
+| **mojo-zlib** | [community package](https://github.com/gabrieldemarmiesse/mojo-zlib) | 1.0-compatible retarget so grpc-mojo can drop its zlib C shim | Gzip already ships in grpc-mojo via `-lz`; mojo-zlib is the shared codec package once it builds on 1.0 |
 | **mojo-threads** | not started | RFC first (see D4) | pthread_create/mutex/condvar via `abi("C")` trampolines; unblocks concurrent serving |
 
 mojo-threads is deliberately RFC-before-code: thread-safety guarantees
@@ -189,8 +190,8 @@ Ordered by leverage-per-effort:
 | Phase | Items | Exit criteria | Status |
 |---|---|---|---|
 | **1 — Foundation** | B1 CI+remote · A3 depth limit · D1 bug report · D2 stdlib PRs · C: extract protomojo + mojo-hpack | CI on macOS **and Linux**; Mojo issue filed; 2 stdlib PRs open; 2 packages on modular-community | CI+remote ✅ · depth limit ✅ · packages extracted ✅ · bug report / stdlib PRs / conda publish pending |
-| **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming (including typed client call objects) · ✅ deadlines/cancel · ✅ interop 72/72 across h2c, TLS, and Unix sockets · ✅ h2spec 146/146 · ✅ flood guards, unknown-field preservation, and proto depth limit |
-| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields, typed enums, service registration); ✅ conformance 1476/1476 for proto3 binary and JSON; gzip blocked on a 1.0-compatible zlib package |
+| **2. Protocol completeness** | A1 streaming · A2 deadlines/cancellation · B2 official interop · B3 h2spec · A3 remaining guards | Official unary+streaming interop green vs grpcio; h2spec clean | ✅ streaming (including typed client call objects) · ✅ deadlines/cancel · ✅ interop 84/84 across h2c, TLS, and Unix sockets (including gzip unary) · ✅ h2spec 146/146 · ✅ flood guards, unknown-field preservation, and proto depth limit |
+| **3: Ecosystem primitives** | C mojo-net (DNS/IPv6/timeouts) + publish; D3 std.net RFC; integrate mojo-zlib + gRPC compression; A4 codegen imports/presence; B4 conformance | `std.net` RFC posted; gzip interop; protobuf conformance green | ✅ net prereqs (DNS/IPv6/UDP/timeouts); ✅ A4 (imports, optional, unknown fields, typed enums, service registration); ✅ conformance 1476/1476 for proto3 binary and JSON; ✅ gzip unary interop via zlib shim; partner mojo-zlib 1.0 still open |
 | **4. Concurrency & TLS** | D4 threads RFC → C mojo-threads → concurrent server · C mojo-tls (ALPN h2) · A5 · B5 benchmarks | Concurrent connections; TLS interop; published benchmarks | TLS interop ✅ · bounded h2c and TLS polling ✅ · A5 max-message + PollingServer keepalive ✅ · B5 published loopback benches vs grpcio/tonic ✅ · PollingServer GOAWAY drain ✅ · PollingServer streaming (blocking on the poll thread) ✅ · parallel handlers and blocking-server keepalive blocked on Mojo threads/async |
 
 **Definition of "100% compatible", concretely:** official gRPC interop

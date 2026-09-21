@@ -84,3 +84,24 @@ struct Empty(Copyable, Defaultable, Movable, ProtoMessage, ProtoJsonMessage):
             if not next_field:
                 break
             reader.skip_unknown_value()
+
+
+def empty_pb_file_descriptor_proto() -> List[Byte]:
+    """Serialized `FileDescriptorProto` for `empty.proto`."""
+    var out: List[Byte] = [
+        10, 11, 101, 109, 112, 116, 121, 46, 112, 114, 111, 116, 111, 18, 12, 103,
+        114, 112, 99, 46, 116, 101, 115, 116, 105, 110, 103, 34, 7, 10, 5, 69,
+        109, 112, 116, 121, 98, 6, 112, 114, 111, 116, 111, 51,
+    ]
+    return out^
+
+def empty_pb_proto_name() -> String:
+    """Filename of `empty.proto` for gRPC reflection."""
+    return String("empty.proto")
+
+def empty_pb_reflection_symbols() -> List[String]:
+    """Fully-qualified symbols declared in `empty.proto`."""
+    var symbols: List[String] = [
+        String("grpc.testing.Empty"),
+    ]
+    return symbols^
