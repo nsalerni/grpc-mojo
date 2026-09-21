@@ -49,6 +49,9 @@ is the live list.
   that bumps `context.version` and the git `rev`. `main` is already
   protected (no delete, no force-push). GitHub About fields
   (description, homepage, topics) are repository settings, not files.
+  The integration token cannot `PATCH` them (`403`); apply
+  [GITHUB_ABOUT.md](GITHUB_ABOUT.md) in each repo's Settings → General.
+  Forum copy is [FORUM_POST.md](FORUM_POST.md) (no Discourse token).
 
 ---
 
