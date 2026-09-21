@@ -45,11 +45,23 @@ the empty name is overall status and defaults to SERVING. Unknown names
 return NOT_FOUND. Watch is not registered, so clients receive UNIMPLEMENTED
 and fall back to Check.
 
+`Server.add_reflection` and `PollingServer.add_reflection` register
+`grpc.reflection.v1` and `v1alpha` `ServerReflectionInfo`. Pass a
+`ReflectionRegistry` populated with codegen
+`add_<module>_file_descriptor` (static `FileDescriptorProto` bytes).
+This is what `grpcurl` / `grpcui` need. Extension lookup is
+UNIMPLEMENTED.
+
+Gzip is negotiated with `grpc-accept-encoding: gzip`. Clients send
+compressed requests with `start_call(..., encoding="gzip")` and
+`send_request_bytes(..., compress=True)`. Handlers set
+`ctx.compress_response = True` to gzip responses.
+
 `PollingServer.request_stop()` sends GOAWAY and returns after live streams
 drain. `install_stop_signals()` writes the wakeup pipe from SIGTERM/SIGINT.
 There is no stop-from-another-thread API.
 
-Verification: the 12 canonical gRPC interop cases pass in both directions
+Verification: the 14 canonical gRPC interop cases pass in both directions
 over h2c, TLS, and Unix domain sockets against `grpcio`
 (`pixi run interop-official`), plus
 behavioral differential checks in `pixi run compliance` (all 16 status

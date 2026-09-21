@@ -48,6 +48,8 @@ CASES = [
     "unimplemented_method",
     "timeout_on_sleeping_server",
     "cancel_after_begin",
+    "client_compressed_unary",
+    "server_compressed_unary",
 ]
 
 PASS = 0
@@ -115,6 +117,15 @@ class RefTestService(grpc.GenericRpcHandler):
         if name == "UnaryCall":
             def unary(req, ctx):
                 _echo_metadata(ctx)
+                # grpcio strips `grpc-encoding` from invocation_metadata
+                # after it decompresses. Invalid gzip fails the call
+                # before this handler; the compressed-flag check lives
+                # on the grpc-mojo server (`ctx.request_compressed`).
+                if (
+                    req.HasField("response_compressed")
+                    and req.response_compressed.value
+                ):
+                    ctx.set_compression(grpc.Compression.Gzip)
                 if req.HasField("response_status"):
                     _maybe_echo_status(req.response_status, ctx)
                 return m.SimpleResponse(
@@ -168,7 +179,10 @@ class RefTestService(grpc.GenericRpcHandler):
 
 def run_direction_a(mode: str):
     print(f"== mojo interop_client vs grpcio reference server ({mode}) ==")
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=8),
+        compression=grpc.Compression.Gzip,
+    )
     server.add_generic_rpc_handlers((RefTestService(),))
     unix_dir = None
     socket_path = None
@@ -362,6 +376,34 @@ def run_case_b(case, channel):
         q.put(None)
         # The connection must remain usable afterwards.
         assert empty_call(e.Empty(), timeout=20) == e.Empty()
+    elif case == "client_compressed_unary":
+        probe = m.SimpleRequest(
+            expect_compressed=m.BoolValue(value=False),
+            response_size=314159,
+            payload=m.Payload(body=b"\x00" * 271828),
+        )
+        resp = unary(
+            probe, timeout=60, compression=grpc.Compression.NoCompression
+        )
+        assert len(resp.payload.body) == 314159
+        req = m.SimpleRequest(
+            expect_compressed=m.BoolValue(value=True),
+            response_size=314159,
+            payload=m.Payload(body=b"\x00" * 271828),
+        )
+        resp = unary(req, timeout=60, compression=grpc.Compression.Gzip)
+        assert len(resp.payload.body) == 314159
+    elif case == "server_compressed_unary":
+        req = m.SimpleRequest(
+            response_compressed=m.BoolValue(value=True),
+            response_size=314159,
+            payload=m.Payload(body=b"\x00" * 271828),
+        )
+        resp, call = unary.with_call(req, timeout=60)
+        assert len(resp.payload.body) == 314159
+        # grpcio hides `grpc-encoding` from application metadata after it
+        # decompresses. The mojo client checks Compressed-Flag 1 in
+        # `case_server_compressed_unary`.
     else:
         raise AssertionError(f"unknown case {case}")
 

@@ -35,7 +35,11 @@ from net import TCPStream, UnixStream, is_timeout_error
 from tls import TLSContext
 from proto import ProtoMessage, decode, encode
 
-from .framing import DEFAULT_MAX_RECV_MESSAGE_SIZE, recv_message, send_message
+from .framing import (
+    DEFAULT_MAX_RECV_MESSAGE_SIZE,
+    recv_message_flag,
+    send_message,
+)
 from .metadata import Metadata, decode_bin_value
 from .status import (
     Status,
@@ -47,7 +51,7 @@ from .status import (
 from .timeout import encode_timeout
 from .transport import GrpcTransport
 
-comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.2.6"
+comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.2.7"
 """Value sent in the user-agent request header."""
 
 
@@ -100,6 +104,8 @@ struct GrpcChannel(Movable):
     """
     var max_message_size: Int
     """Maximum serialized request or response size, default 4 MiB."""
+    var last_recv_compressed: Bool
+    """True when the most recent received message had Compressed-Flag 1."""
 
     @staticmethod
     def connect(
@@ -137,6 +143,7 @@ struct GrpcChannel(Movable):
             scheme=String("http"),
             deadline_ns=0,
             max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
+            last_recv_compressed=False,
         )
 
     @staticmethod
@@ -178,6 +185,7 @@ struct GrpcChannel(Movable):
             scheme=String("http"),
             deadline_ns=0,
             max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
+            last_recv_compressed=False,
         )
 
     @staticmethod
@@ -244,6 +252,7 @@ struct GrpcChannel(Movable):
             scheme=String("https"),
             deadline_ns=0,
             max_message_size=DEFAULT_MAX_RECV_MESSAGE_SIZE,
+            last_recv_compressed=False,
         )
 
     def set_max_message_size(mut self, size: Int) raises:
@@ -317,9 +326,15 @@ struct GrpcChannel(Movable):
 
     def _recv_capped(mut self, sid: UInt32) raises -> Optional[List[Byte]]:
         try:
-            return recv_message(
-                self.conn, sid, max_size=self.max_message_size
+            var compressed = False
+            var msg = recv_message_flag(
+                self.conn,
+                sid,
+                max_size=self.max_message_size,
+                compressed=compressed,
             )
+            self.last_recv_compressed = compressed
+            return msg^
         except e:
             if String(e) == "grpc: message exceeds max size":
                 self._reset_on_size_error(sid)
@@ -331,11 +346,13 @@ struct GrpcChannel(Movable):
         metadata: Metadata,
         *,
         timeout_ns: Int64 = 0,
+        encoding: StringSpan = "",
     ) raises -> UInt32:
         """Opens a stream and sends the gRPC Request-Headers.
 
         Sends the pseudo-headers, `te: trailers`, `content-type:
-        application/grpc+proto`, the user agent, an optional `grpc-timeout`,
+        application/grpc+proto`, the user agent, `grpc-accept-encoding:
+        gzip`, an optional `grpc-timeout`, an optional `grpc-encoding`,
         and the caller's custom metadata. With a timeout, the channel also
         records an absolute deadline that the receive paths enforce. A later
         `start_call` replaces that channel-level deadline; typed call
@@ -345,6 +362,9 @@ struct GrpcChannel(Movable):
             path: Full method path, e.g. `/echo.Echo/Say`.
             metadata: Custom metadata to send with the request headers.
             timeout_ns: Call deadline in nanoseconds; 0 means none.
+            encoding: Value for `grpc-encoding`. Use `"gzip"` when the
+                request messages will be compressed; empty omits the
+                header (identity).
 
         Returns:
             The stream id for use with the other call methods.
@@ -383,6 +403,17 @@ struct GrpcChannel(Movable):
                 name=String("user-agent"), value=String(GRPC_MOJO_USER_AGENT)
             )
         )
+        headers.append(
+            HeaderField(
+                name=String("grpc-accept-encoding"), value=String("gzip")
+            )
+        )
+        if encoding.byte_length() > 0:
+            headers.append(
+                HeaderField(
+                    name=String("grpc-encoding"), value=String(encoding)
+                )
+            )
         for e in metadata.entries:
             headers.append(e.copy())
         self.conn.send_headers(sid, Span(headers), end_stream=False)
@@ -393,7 +424,12 @@ struct GrpcChannel(Movable):
         return sid
 
     def send_request_bytes(
-        mut self, sid: UInt32, payload: Span[Byte, _], *, last: Bool
+        mut self,
+        sid: UInt32,
+        payload: Span[Byte, _],
+        *,
+        last: Bool,
+        compress: Bool = False,
     ) raises:
         """Sends one serialized request message on a call.
 
@@ -402,6 +438,8 @@ struct GrpcChannel(Movable):
             payload: The serialized message bytes.
             last: Whether this is the final request message; if True the
                 request stream is half-closed (END_STREAM).
+            compress: When True, gzip-compress the payload. Pair with
+                `start_call(..., encoding="gzip")`.
 
         Raises:
             If `payload` exceeds `max_message_size`, or on connection I/O
@@ -411,7 +449,9 @@ struct GrpcChannel(Movable):
         if len(payload) > self.max_message_size:
             self._reset_on_size_error(sid)
             raise Error("grpc: message exceeds max size")
-        send_message(self.conn, sid, payload, end_stream=last)
+        send_message(
+            self.conn, sid, payload, end_stream=last, compress=compress
+        )
 
     def close_send(mut self, sid: UInt32) raises:
         """Half-closes the request stream without a message.

@@ -61,8 +61,15 @@ from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
 
 from .framing import GRPC_MESSAGE_PREFIX_LEN, frame_message
+from .gzip import encoding_is_supported, gzip_compress, gzip_decompress
 from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
+from .reflection import (
+    ReflectionRegistry,
+    ServerReflectionRequest,
+    is_reflection_path,
+    service_name_from_path,
+)
 from .server import (
     MethodKind,
     RawHandler,
@@ -354,7 +361,7 @@ struct _PendingWrite(Movable, Sized):
 
 
 @fieldwise_init
-struct _PollingRoute(Movable):
+struct _PollingRoute(Copyable, Movable):
     var handler: UnaryBytesHandler
 
 
@@ -397,6 +404,7 @@ struct _PollingConnection(Movable):
     var request: List[Byte]
     var request_length: Int
     var request_complete: Bool
+    var request_compressed: Bool
     var discard_request: Bool
     var request_error: Optional[Status]
     var unsupported_media_type: Bool
@@ -439,6 +447,7 @@ struct _PollingConnection(Movable):
         self.request = List[Byte]()
         self.request_length = -1
         self.request_complete = False
+        self.request_compressed = False
         self.discard_request = False
         self.request_error = None
         self.unsupported_media_type = False
@@ -500,6 +509,7 @@ struct _PollingConnection(Movable):
         self.request = List[Byte]()
         self.request_length = -1
         self.request_complete = False
+        self.request_compressed = False
         self.discard_request = False
         self.request_error = None
         self.unsupported_media_type = False
@@ -537,6 +547,13 @@ def _initial_headers(ctx: ServerContext) -> List[HeaderField]:
             value=String("application/grpc+proto"),
         )
     )
+    headers.append(
+        HeaderField(name=String("grpc-accept-encoding"), value=String("gzip"))
+    )
+    if ctx.compress_response:
+        headers.append(
+            HeaderField(name=String("grpc-encoding"), value=String("gzip"))
+        )
     for entry in ctx.response_metadata.entries:
         headers.append(entry.copy())
     return headers^
@@ -608,6 +625,8 @@ struct PollingServer(Movable):
     """Whether a Unix listener may remove an existing socket file."""
     var health: Optional[Health]
     """Health registry for Check; None leaves the method UNIMPLEMENTED."""
+    var reflection: Optional[ReflectionRegistry]
+    """File-descriptor set for server reflection; None leaves it UNIMPLEMENTED."""
     var _stop_requested: Bool
     """True once `request_stop` or a stop signal has been observed."""
     var _wakeup: Optional[Wakeup]
@@ -643,6 +662,7 @@ struct PollingServer(Movable):
         self._unix_path = None
         self._unix_remove_existing = False
         self.health = None
+        self.reflection = None
         self._stop_requested = False
         self._wakeup = None
         self._shutdown_deadline_ns = 0
@@ -981,6 +1001,57 @@ struct PollingServer(Movable):
         """
         self.health = registry^
 
+    def add_reflection(mut self, var registry: ReflectionRegistry):
+        """Registers gRPC server reflection on v1 and v1alpha.
+
+        The bidi handler runs on the event-loop thread and stalls other
+        connections for the duration of the reflection stream, matching
+        every other streaming method.
+
+        Args:
+            registry: Descriptor set. Service names from this server's
+                routes are merged in at call time.
+        """
+        self.reflection = registry^
+
+    def _listed_services(self) raises -> List[String]:
+        var names = Dict[String, Bool]()
+        if self.health:
+            names[String("grpc.health.v1.Health")] = True
+        if self.reflection:
+            names[String("grpc.reflection.v1.ServerReflection")] = True
+            names[String("grpc.reflection.v1alpha.ServerReflection")] = True
+        for path in self.routes:
+            var svc = service_name_from_path(path)
+            if svc:
+                names[svc.value()] = True
+        for path in self.streaming_routes:
+            var svc = service_name_from_path(path)
+            if svc:
+                names[svc.value()] = True
+        if self.reflection:
+            for name in self.reflection.value().services():
+                names[name.copy()] = True
+        var out = List[String]()
+        for name in names:
+            out.append(name.copy())
+        return out^
+
+    def _serve_reflection(
+        mut self, mut call: ServerCall, mut ctx: ServerContext
+    ) raises:
+        while True:
+            var msg = call.recv[ServerReflectionRequest]()
+            if call.client_cancelled():
+                call.trailers_sent = True
+                return
+            if not msg:
+                break
+            var services = self._listed_services()
+            var resp = self.reflection.value().respond(msg.value(), services)
+            call.send(ctx, resp)
+        call.finish_ok(ctx)
+
     def request_stop(mut self) raises:
         """Asks `serve()` to send GOAWAY, drain live streams, and return.
 
@@ -1063,10 +1134,23 @@ struct PollingServer(Movable):
                     ),
                 )
 
+        var encoding = _find_header(Span(headers), "grpc-encoding")
+        if encoding and not encoding_is_supported(encoding.value()):
+            self._set_request_error(
+                connection,
+                Status(
+                    code=StatusCode.UNIMPLEMENTED,
+                    message=String("grpc: compression algorithm not supported"),
+                ),
+            )
+
         if (
             connection.ctx.path not in self.routes
             and (connection.ctx.path not in self.streaming_routes)
             and not (self.health and connection.ctx.path == HEALTH_CHECK_PATH)
+            and not (
+                self.reflection and is_reflection_path(connection.ctx.path)
+            )
         ):
             self._set_request_error(
                 connection,
@@ -1129,14 +1213,6 @@ struct PollingServer(Movable):
                             message=String("invalid compressed flag"),
                         ),
                     )
-                elif flag == 1:
-                    self._set_request_error(
-                        connection,
-                        Status(
-                            code=StatusCode.INTERNAL,
-                            message=String("compressed messages not supported"),
-                        ),
-                    )
                 elif connection.request_length > self.config.max_message_size:
                     self._set_request_error(
                         connection,
@@ -1147,6 +1223,9 @@ struct PollingServer(Movable):
                     )
                 elif connection.request_length == 0:
                     connection.request_complete = True
+                    connection.ctx.request_compressed = False
+                else:
+                    connection.request_compressed = flag == 1
             return connection.h2.pending_output_len() > 0
 
         var need = connection.request_length - len(connection.request)
@@ -1156,7 +1235,25 @@ struct PollingServer(Movable):
                 Span(connection.h2.take_buffered_data(sid, take))
             )
         if len(connection.request) == connection.request_length:
-            connection.request_complete = True
+            if connection.request_compressed:
+                try:
+                    connection.request = gzip_decompress(
+                        Span(connection.request),
+                        max_size=self.config.max_message_size,
+                    )
+                    connection.ctx.request_compressed = True
+                    connection.request_complete = True
+                except e:
+                    var message = String(e)
+                    var code = StatusCode.INTERNAL
+                    if message == "grpc: message exceeds max size":
+                        code = StatusCode.RESOURCE_EXHAUSTED
+                    self._set_request_error(
+                        connection, Status(code=code, message=message)
+                    )
+            else:
+                connection.request_complete = True
+                connection.ctx.request_compressed = False
         return connection.h2.pending_output_len() > 0
 
     def _request_ended(self, connection: _PollingConnection) raises -> Bool:
@@ -1210,6 +1307,10 @@ struct PollingServer(Movable):
                     code=StatusCode.RESOURCE_EXHAUSTED,
                     message=String("response message exceeds max size"),
                 )
+            elif connection.ctx.compress_response:
+                var gz = gzip_compress(Span(payload))
+                connection.response = frame_message(Span(gz), compressed=True)
+                connection.response_status = Status.ok()
             else:
                 connection.response = frame_message(Span(payload))
                 connection.response_status = Status.ok()
@@ -1392,6 +1493,7 @@ struct PollingServer(Movable):
                 call_start_ns=connection.call_start_ns,
                 max_message_size=self.config.max_message_size,
                 _oversized_message=False,
+                last_message_compressed=False,
             )
             call.finish(
                 Status(
@@ -1414,10 +1516,14 @@ struct PollingServer(Movable):
             call_start_ns=connection.call_start_ns,
             max_message_size=self.config.max_message_size,
             _oversized_message=False,
+            last_message_compressed=False,
         )
-        var handler = self.streaming_routes[connection.ctx.path].handler
         try:
-            handler(call, connection.ctx)
+            if self.reflection and is_reflection_path(connection.ctx.path):
+                self._serve_reflection(call, connection.ctx)
+            else:
+                var handler = self.streaming_routes[connection.ctx.path].handler
+                handler(call, connection.ctx)
         except e:
             if not call.trailers_sent:
                 var message = String(e)
@@ -1476,6 +1582,15 @@ struct PollingServer(Movable):
                     connection.reset_call()
             return
 
+        if self.reflection and is_reflection_path(connection.ctx.path):
+            var has_data = (
+                connection.h2.buffered_data_len(connection.active_sid) > 0
+            )
+            if not has_data and not self._request_ended(connection):
+                return
+            self._run_blocking_stream(connection)
+            return
+
         var kind = self.streaming_routes[connection.ctx.path].kind
         if kind == MethodKind.SERVER_STREAMING:
             if not self._request_ended(connection):
@@ -1504,7 +1619,10 @@ struct PollingServer(Movable):
             connection.reset_call()
             return
 
-        if connection.ctx.path in self.streaming_routes:
+        if (
+            connection.ctx.path in self.streaming_routes
+            or (self.reflection and is_reflection_path(connection.ctx.path))
+        ):
             self._drive_streaming(connection)
             return
 

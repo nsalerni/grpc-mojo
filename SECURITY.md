@@ -24,9 +24,10 @@ The project has not had an external security review. Remaining work is in
 - HTTP/2 `SETTINGS` ACK timeout is not armed here; the connection is
   caller-driven. Apply an application timer if a peer that never ACKs
   SETTINGS should be torn down.
-- Health Watch, gzip, and concurrent handlers stay unimplemented; they
-  are blocked on Mojo threads or a 1.0-compatible zlib, not silent skips
-  on the wire (Watch is UNIMPLEMENTED, compressed messages are rejected).
+- Health Watch and concurrent handlers stay unimplemented; they are
+  blocked on Mojo threads, not silent skips on the wire (Watch is
+  UNIMPLEMENTED). Gzip is implemented via zlib; unknown encodings
+  return UNIMPLEMENTED.
 - Unix sockets are plaintext only. `Server.unix()` and
   `PollingServer.unix()` have no TLS path; the TLS APIs bind TCP host
   and port pairs. Use a trusted filesystem boundary for Unix, or the
