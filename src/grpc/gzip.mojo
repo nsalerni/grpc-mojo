@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""gzip codec for gRPC payloads, via zlib in the stop-signal shim library.
+"""Gzip codec for gRPC payloads, via zlib in the stop-signal shim library.
 
 gRPC uses RFC 1952 gzip (not zlib wrapping). Compressed messages are
 negotiated with `grpc-encoding` / `grpc-accept-encoding`. This module
@@ -107,7 +107,7 @@ def gzip_decompress(
     """Decompresses a gzip payload, capping the uncompressed size.
 
     Args:
-        src: gzip-wrapped bytes.
+        src: Gzip-wrapped bytes.
         max_size: Maximum accepted uncompressed length.
 
     Returns:

@@ -8,7 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 # ===----------------------------------------------------------------------=== #
 
-"""gRPC server reflection (v1 and v1alpha).
+"""Server reflection for gRPC (v1 and v1alpha).
 
 Handwritten messages matching `grpc.reflection.v1.ServerReflection`.
 File descriptors are static bytes from codegen, not a Python-style
