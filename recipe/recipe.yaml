@@ -25,11 +25,15 @@ build:
         case "$(uname -s)" in
           Darwin)
             "${CC}" -dynamiclib -fPIC -O2 -Wall -Werror \
+              -I"${PREFIX}/include" \
+              -L"${PREFIX}/lib" \
               -o "${PREFIX}/lib/libgrpcstop.dylib" \
               shim/grpc_stop_signals.c shim/grpc_gzip.c -lz
             ;;
           *)
             "${CC}" -shared -fPIC -O2 -Wall -Werror \
+              -I"${PREFIX}/include" \
+              -L"${PREFIX}/lib" \
               -o "${PREFIX}/lib/libgrpcstop.so" \
               shim/grpc_stop_signals.c shim/grpc_gzip.c -lz
             ;;

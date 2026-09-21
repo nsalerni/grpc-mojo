@@ -22,6 +22,11 @@ from std.sys import CompilationTarget
 
 
 def _shim_filename() -> String:
+    """Returns `libgrpcstop.dylib` on macOS and `libgrpcstop.so` elsewhere.
+
+    Returns:
+        The platform-specific shared-library filename.
+    """
     comptime if CompilationTarget.is_macos():
         return "libgrpcstop.dylib"
     else:
@@ -29,6 +34,14 @@ def _shim_filename() -> String:
 
 
 def _shim_path() raises -> String:
+    """Resolves the gzip/stop-signal shim: env, `build/`, then conda prefix.
+
+    Returns:
+        An existing path to `libgrpcstop`.
+
+    Raises:
+        If no candidate path exists.
+    """
     var name = _shim_filename()
     var candidates = List[String]()
     var env = getenv("GRPC_STOP_SHIM")

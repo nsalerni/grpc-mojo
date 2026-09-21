@@ -409,6 +409,19 @@ struct ReflectionRegistry(Movable):
     def _file_response(
         self, filename: String, var resp: ServerReflectionResponse
     ) raises -> ServerReflectionResponse:
+        """Fills `resp` with the `FileDescriptorProto` for `filename`.
+
+        Args:
+            filename: Proto filename as registered with `add_file`.
+            resp: Response shell with `valid_host` already set.
+
+        Returns:
+            A file-descriptor response, or NOT_FOUND if `filename` is
+            unknown.
+
+        Raises:
+            If the descriptor map lookup fails.
+        """
         if filename not in self._files:
             resp.kind = _RESP_ERROR
             resp.error_code = StatusCode.NOT_FOUND
