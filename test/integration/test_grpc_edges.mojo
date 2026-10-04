@@ -104,6 +104,16 @@ def test_timeout_decode_edges() raises:
     _ = expect_error(non_digit, "non-digit body")
     assert_true("malformed" in expect_error(negative_digits, "negative"))
 
+    # TimeoutValue is ASCII digits only; reject forms Int() would parse.
+    assert_equal(decode_timeout("05S"), 5_000_000_000)
+    for bad in ["+5S", "-0n", " 5S", "5 S", "1_0S", "\t5m"]:
+        var raised = False
+        try:
+            _ = decode_timeout(bad)
+        except e:
+            raised = "malformed" in String(e)
+        assert_true(raised, "accepted malformed grpc-timeout: " + bad)
+
 
 # --- metadata semantics ---
 
