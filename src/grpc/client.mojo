@@ -18,13 +18,21 @@ those), or the lower-level primitives `start_call`, `send_msg`,
 `recv_msg`, `close_send`, and `finish`.
 
 Deadlines are enforced client-side: `start_call(timeout_ns=...)` sends the
-`grpc-timeout` header and records an absolute monotonic deadline, receive
-paths arm the socket read timeout (SO_RCVTIMEO) with the remaining budget,
-and on expiry the call is cancelled with RST_STREAM(CANCEL) and surfaces
-`DEADLINE_EXCEEDED`. Typed call objects copy that deadline and restore it
-before `recv` / `finish`, so overlapping timed calls on one channel keep
-independent budgets. The raw `start_call` API still has one channel-level
-deadline; a later `start_call` replaces it.
+`grpc-timeout` header and records an absolute monotonic deadline. Every
+step that can block reading — receives, `finish`, and sends waiting for
+flow-control credit — first arms the socket read timeout (SO_RCVTIMEO)
+with the remaining budget, or clears it for an untimed call, so no step
+runs under a timeout another call left behind. On expiry the call is
+cancelled with RST_STREAM(CANCEL) and surfaces `DEADLINE_EXCEEDED`. Typed
+call objects copy that deadline and restore it before `send` / `recv` /
+`finish`, so overlapping timed calls on one channel keep independent
+budgets. The raw `start_call` API still has one channel-level deadline; a
+later `start_call` replaces it.
+
+A call that fails on a stream the server may still consider open is
+reset with RST_STREAM(CANCEL) and its deadline is cleared, so the next
+call on the channel neither inherits its timeout nor waits behind its
+stream slot.
 """
 
 from std.time import monotonic
@@ -318,11 +326,55 @@ struct GrpcChannel(Movable):
         self.conn.streams[sid].reset_code = ERR_CANCEL
         self._clear_deadline()
 
-    def _reset_on_size_error(mut self, sid: UInt32):
+    def _begin_step(mut self, sid: UInt32) raises:
+        """Arms the call deadline before a step that may block reading.
+
+        Sends read too: a DATA frame larger than the peer's window waits
+        for WINDOW_UPDATE.
+
+        Raises:
+            `grpc: DEADLINE_EXCEEDED` after ending the call when the
+            deadline has already passed; on connection I/O errors.
+        """
+        if not self._arm_deadline():
+            raise self._abort(sid, Error("grpc: DEADLINE_EXCEEDED"))
+
+    def _abort(mut self, sid: UInt32, error: Error) -> Error:
+        """Ends a failed call so its state cannot reach the next call.
+
+        Resets `sid` with RST_STREAM(CANCEL) unless it is already reset or
+        closed in both directions, so the peer releases the stream slot,
+        and clears the deadline. Best effort: a broken connection fails
+        the next call on its own.
+
+        Returns:
+            The error to raise; a socket timeout becomes
+            `grpc: DEADLINE_EXCEEDED`.
+        """
+        var open = False
         try:
-            self.cancel(sid)
+            if sid in self.conn.streams:
+                open = not (
+                    Bool(self.conn.streams[sid].reset_code)
+                    or (
+                        self.conn.streams[sid].local_end
+                        and self.conn.streams[sid].end_stream
+                    )
+                )
         except:
             pass
+        if open:
+            try:
+                self.cancel(sid)
+            except:
+                pass
+        try:
+            self._clear_deadline()
+        except:
+            pass
+        if is_timeout_error(error):
+            return Error("grpc: DEADLINE_EXCEEDED")
+        return error.copy()
 
     def _recv_capped(mut self, sid: UInt32) raises -> Optional[List[Byte]]:
         try:
@@ -336,9 +388,9 @@ struct GrpcChannel(Movable):
             self.last_recv_compressed = compressed
             return msg^
         except e:
-            if String(e) == "grpc: message exceeds max size":
-                self._reset_on_size_error(sid)
-            raise e
+            if is_timeout_error(e):
+                raise e
+            raise self._abort(sid, e)
 
     def start_call(
         mut self,
@@ -433,6 +485,9 @@ struct GrpcChannel(Movable):
     ) raises:
         """Sends one serialized request message on a call.
 
+        Unlike `send_msg`, this does not arm the call deadline; use it when
+        managing timeouts manually.
+
         Args:
             sid: The stream id returned by `start_call`.
             payload: The serialized message bytes.
@@ -447,8 +502,7 @@ struct GrpcChannel(Movable):
             with RST_STREAM(CANCEL) before raising.
         """
         if len(payload) > self.max_message_size:
-            self._reset_on_size_error(sid)
-            raise Error("grpc: message exceeds max size")
+            raise self._abort(sid, Error("grpc: message exceeds max size"))
         send_message(
             self.conn, sid, payload, end_stream=last, compress=compress
         )
@@ -484,8 +538,8 @@ struct GrpcChannel(Movable):
 
         Raises:
             On framing or connection errors, or when the message exceeds
-            `max_message_size`. An oversized response resets `sid` with
-            RST_STREAM(CANCEL) before raising.
+            `max_message_size`. Any failure other than a socket timeout
+            resets `sid` with RST_STREAM(CANCEL) before raising.
         """
         return self._recv_capped(sid)
 
@@ -493,6 +547,10 @@ struct GrpcChannel(Movable):
         M: ProtoMessage
     ](mut self, sid: UInt32, msg: M, *, last: Bool = False) raises:
         """Sends one typed message on a streaming call.
+
+        Honors the call deadline set in `start_call` while the send waits
+        for flow-control credit; on expiry the call is cancelled with
+        RST_STREAM(CANCEL) and DEADLINE_EXCEEDED is raised.
 
         Parameters:
             M: The request message type.
@@ -504,10 +562,16 @@ struct GrpcChannel(Movable):
                 request stream is half-closed.
 
         Raises:
-            On encoding or connection errors, or when the encoded message
-            exceeds `max_message_size`.
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            encoding or connection errors, or when the encoded message
+            exceeds `max_message_size`. Any failure resets `sid` with
+            RST_STREAM(CANCEL) before raising.
         """
-        self.send_request_bytes(sid, Span(encode(msg)), last=last)
+        self._begin_step(sid)
+        try:
+            self.send_request_bytes(sid, Span(encode(msg)), last=last)
+        except e:
+            raise self._abort(sid, e)
 
     def recv_msg[M: ProtoMessage](mut self, sid: UInt32) raises -> Optional[M]:
         """Receives the next typed message; None when the stream ends.
@@ -529,21 +593,17 @@ struct GrpcChannel(Movable):
         Raises:
             `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
             decoding, framing, or connection errors, or when the message
-            exceeds `max_message_size`.
+            exceeds `max_message_size`. Any failure resets `sid` with
+            RST_STREAM(CANCEL) before raising.
         """
-        if not self._arm_deadline():
-            self.cancel(sid)
-            raise Error("grpc: DEADLINE_EXCEEDED")
+        self._begin_step(sid)
         try:
             var raw = self._recv_capped(sid)
             if raw:
                 return decode[M](Span(raw.value()))
             return None
         except e:
-            if is_timeout_error(e):
-                self.cancel(sid)
-                raise Error("grpc: DEADLINE_EXCEEDED")
-            raise e
+            raise self._abort(sid, e)
 
     def finish(mut self, sid: UInt32) raises -> CallResult:
         """Waits for the stream to end and assembles status plus metadata.
@@ -552,6 +612,10 @@ struct GrpcChannel(Movable):
         `grpc-status-details-bin` from the trailers — or from the only
         HEADERS block of a Trailers-Only response — and maps RST_STREAM or
         bare HTTP errors to gRPC codes when the server sent no status.
+
+        If the server ended the call while the request stream was still
+        open, the request stream is half-closed so the call stops holding a
+        stream slot on either endpoint.
 
         Args:
             sid: The stream id returned by `start_call`.
@@ -562,18 +626,19 @@ struct GrpcChannel(Movable):
 
         Raises:
             `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
-            connection I/O or HTTP/2 protocol errors.
+            connection I/O or HTTP/2 protocol errors. Any failure resets
+            `sid` with RST_STREAM(CANCEL) before raising.
         """
-        if not self._arm_deadline():
-            self.cancel(sid)
-            raise Error("grpc: DEADLINE_EXCEEDED")
+        self._begin_step(sid)
         try:
             self.conn.wait_stream_end(sid)
+            if not (
+                self.conn.streams[sid].local_end
+                or self.conn.streams[sid].reset_code
+            ):
+                self.close_send(sid)
         except e:
-            if is_timeout_error(e):
-                self.cancel(sid)
-                raise Error("grpc: DEADLINE_EXCEEDED")
-            raise e
+            raise self._abort(sid, e)
         var status = self._extract_status(sid)
         var initial = Metadata()
         var trailing = Metadata()
@@ -696,28 +761,25 @@ struct GrpcChannel(Movable):
         if len(request) > self.max_message_size:
             raise Error("grpc: message exceeds max size")
         var sid = self.start_call(path, metadata, timeout_ns=timeout_ns)
-        self.send_request_bytes(sid, request, last=True)
         var response = List[Byte]()
         var had_msg: Bool
+        var result: CallResult
         try:
-            if not self._arm_deadline():
-                raise Error("net: timeout")
+            self._begin_step(sid)
+            self.send_request_bytes(sid, request, last=True)
+            self._begin_step(sid)
             self.conn.wait_headers(sid)
-            if not self._arm_deadline():
-                raise Error("net: timeout")
+            self._begin_step(sid)
             # A failed call may carry no response message; try to read one
             # but treat a clean end as "no message"; the status decides.
             var msg = self.recv_response_bytes(sid)
             had_msg = Bool(msg)
             if msg:
                 response = msg.take()
+            result = self.finish(sid)
         except e:
-            if is_timeout_error(e):
-                try:
-                    self.cancel(sid)
-                except:
-                    pass
-                self._clear_deadline()
+            var failure = self._abort(sid, e)
+            if String(failure) == "grpc: DEADLINE_EXCEEDED":
                 return CallResult(
                     status=Status(
                         code=StatusCode.DEADLINE_EXCEEDED,
@@ -727,10 +789,7 @@ struct GrpcChannel(Movable):
                     trailing_metadata=Metadata(),
                     response=List[Byte](),
                 )
-            self._clear_deadline()
-            raise e
-        var result = self.finish(sid)
-        self._clear_deadline()
+            raise failure^
         if result.status.is_ok() and not had_msg:
             result.status = Status(
                 code=StatusCode.INTERNAL,
@@ -979,6 +1038,7 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._send_closed:
             raise Error("grpc: send after close_send")
+        self._channel[].deadline_ns = self._deadline_ns
         self._channel[].send_msg[Self.Req](self.sid, msg, last=False)
 
     def close_send(mut self) raises:
@@ -1111,6 +1171,7 @@ struct BidiStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
         """
         if self._send_closed:
             raise Error("grpc: send after close_send")
+        self._channel[].deadline_ns = self._deadline_ns
         self._channel[].send_msg[Self.Req](self.sid, msg, last=last)
         if last:
             self._send_closed = True

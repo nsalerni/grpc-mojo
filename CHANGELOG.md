@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- `GrpcChannel` arms the call deadline before every step that can block
+  reading, including `send_msg` and `unary_bytes` sends that wait for
+  flow-control credit. Such a send now fails with `DEADLINE_EXCEEDED` on
+  its own budget instead of a socket timeout left by another call, or
+  blocking past its deadline. Typed calls restore their deadline before
+  `send` as well as `recv` and `finish`.
+- Any client call failure on a stream the server may still hold open
+  (bad Compressed-Flag, gzip failure, undecodable message, oversized
+  message, timeout) resets the stream with RST_STREAM(CANCEL) and clears
+  the deadline, so the next call on the channel does not hit
+  `MAX_CONCURRENT_STREAMS` behind it. `finish` half-closes a request
+  stream the server ended first.
+
 ## 0.2.7 - 2026-09-21
 
 - Add gzip (`grpc-encoding` / `grpc-accept-encoding`) via zlib in the
