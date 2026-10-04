@@ -82,9 +82,12 @@ def decode_timeout(value: StringSpan) raises -> Int64:
         raise Error("grpc: malformed grpc-timeout")
     var digits = value[byte = 0 : n - 1]
     var unit = value[byte = n - 1 : n]
+    # Int() also accepts a sign, surrounding whitespace, and `_` separators,
+    # none of which the spec's TimeoutValue allows.
+    for b in digits.as_bytes():
+        if b < Byte(ord("0")) or b > Byte(ord("9")):
+            raise Error("grpc: malformed grpc-timeout")
     var amount = Int64(Int(digits))
-    if amount < 0:
-        raise Error("grpc: malformed grpc-timeout")
     if unit == "n":
         return amount
     elif unit == "u":
