@@ -408,12 +408,14 @@ struct GrpcChannel(Movable):
             RST_STREAM(CANCEL) before raising.
         """
         self._begin_step(sid)
+        var compressed = self.last_recv_compressed
         var extra: Optional[List[Byte]]
         try:
             extra = self._recv_capped(sid)
         except e:
             raise self._abort(sid, e)
         if not extra:
+            self.last_recv_compressed = compressed
             return False
         _ = self._abort(sid, Error("grpc: more than one response message"))
         return True

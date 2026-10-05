@@ -944,6 +944,7 @@ def test_public_unary_api() raises:
         server.register_unary[fork_details_handler]("/echo.Echo/Details")
         server.register_bidi[fork_silent_handler]("/echo.Echo/Silent")
         server.register_bidi[fork_twice_handler]("/echo.Echo/Twice")
+        server.register_unary[gzip_echo_handler]("/echo.Echo/Gzip")
         try:
             var tcp = listener.accept()
             var transport = GrpcTransport.plaintext(tcp^)
@@ -964,6 +965,14 @@ def test_public_unary_api() raises:
         "/echo.Echo/Say", EchoRequest(message="hi"), timeout_ns=5_000_000_000
     )
     assert_equal(resp.message, "echo: hi")
+    assert_false(channel.last_recv_compressed)
+
+    # The response's Compressed-Flag is still visible after the call ends.
+    resp = channel.unary[EchoRequest, EchoResponse](
+        "/echo.Echo/Gzip", EchoRequest(message="gz"), timeout_ns=5_000_000_000
+    )
+    assert_equal(resp.message, "gz")
+    assert_true(channel.last_recv_compressed, "response Compressed-Flag is 1")
 
     # Typed unary raises Status.to_error() on a non-OK status.
     var raised = False
