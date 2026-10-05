@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Custom metadata on a Trailers-Only response is `trailing_metadata`.
+  `GrpcChannel.finish` leaves `initial_metadata` empty when the only
+  HEADERS block carries `grpc-status`. `ServerCall.finish` and
+  `PollingServer` send `response_metadata` as initial headers before the
+  status trailers when that metadata is set and headers have not gone out
+  yet. Callers that read those error entries from `initial_metadata` now
+  find them on `trailing_metadata`.
 - `GrpcChannel` arms the call deadline before every step that can block
   reading, including `send_msg` and `unary_bytes` sends that wait for
   flow-control credit. Such a send now fails with `DEADLINE_EXCEEDED` on
