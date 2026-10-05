@@ -442,6 +442,54 @@ struct ServerCall(Movable):
         self.finish(Status.ok(), ctx)
 
 
+def _recv_single_request(
+    mut call: ServerCall, mut ctx: ServerContext
+) raises -> Optional[List[Byte]]:
+    """Reads the only request message of a unary or server-streaming call.
+
+    Waits for the client to half-close, so a second message is caught
+    before any handler runs. Records the message's Compressed-Flag in
+    `ctx.request_compressed`.
+
+    Returns:
+        The request message, or None after the call has been settled: the
+        client cancelled, or the call finished INTERNAL because the client
+        sent no message or more than one.
+
+    Raises:
+        On framing or connection errors, or when a message exceeds
+        `max_message_size`.
+    """
+    var msg = call.recv_bytes()
+    if call.client_cancelled():
+        call.trailers_sent = True
+        return None
+    if not msg:
+        call.finish(
+            Status(
+                code=StatusCode.INTERNAL,
+                message=String("missing request message"),
+            ),
+            ctx,
+        )
+        return None
+    ctx.request_compressed = call.last_message_compressed
+    var extra = call.recv_bytes()
+    if call.client_cancelled():
+        call.trailers_sent = True
+        return None
+    if extra:
+        call.finish(
+            Status(
+                code=StatusCode.INTERNAL,
+                message=String("multiple messages in unary request"),
+            ),
+            ctx,
+        )
+        return None
+    return msg^
+
+
 comptime RawHandler = def(mut ServerCall, mut ServerContext) raises thin -> None
 """The common handler shape every registration wraps into: a thin function
 pointer driving one call via `ServerCall` and `ServerContext`."""
@@ -619,9 +667,11 @@ struct Server(Movable):
     ](mut self, path: StringSpan):
         """Registers a byte-level unary handler for a method path.
 
-        The wrapper receives the request message, invokes the handler, and
-        finishes the call — honoring `ctx.abort`, client cancellation, and
-        the deadline. A missing request message finishes as INTERNAL.
+        The wrapper receives the request message once the client
+        half-closes, invokes the handler, and finishes the call — honoring
+        `ctx.abort`, client cancellation, and the deadline. A missing or
+        second request message finishes as INTERNAL without invoking the
+        handler.
 
         Parameters:
             handler: The unary handler taking request bytes and the call
@@ -632,20 +682,9 @@ struct Server(Movable):
         """
 
         def wrapped(mut call: ServerCall, mut ctx: ServerContext) raises:
-            var msg = call.recv_bytes()
-            if call.client_cancelled():
-                call.trailers_sent = True
-                return
+            var msg = _recv_single_request(call, ctx)
             if not msg:
-                call.finish(
-                    Status(
-                        code=StatusCode.INTERNAL,
-                        message=String("missing request message"),
-                    ),
-                    ctx,
-                )
                 return
-            ctx.request_compressed = call.last_message_compressed
             var response = handler(msg.take(), ctx)
             if ctx.abort_status:
                 call.finish(ctx.abort_status.value().copy(), ctx)
@@ -723,10 +762,11 @@ struct Server(Movable):
     ](mut self, path: StringSpan):
         """Registers a server-streaming handler for a method path.
 
-        The wrapper reads the single request message, then hands the call
-        to the handler to `call.send` any number of responses; on return
-        the call finishes OK unless `ctx.abort` was used. A missing request
-        message finishes as INTERNAL.
+        The wrapper reads the single request message once the client
+        half-closes, then hands the call to the handler to `call.send` any
+        number of responses; on return the call finishes OK unless
+        `ctx.abort` was used. A missing or second request message finishes
+        as INTERNAL without invoking the handler.
 
         Parameters:
             Req: The request message type (inferred from the handler).
@@ -738,21 +778,10 @@ struct Server(Movable):
         """
 
         def wrapped(mut call: ServerCall, mut ctx: ServerContext) raises:
-            var msg = call.recv[Req]()
-            if call.client_cancelled():
-                call.trailers_sent = True
-                return
+            var msg = _recv_single_request(call, ctx)
             if not msg:
-                call.finish(
-                    Status(
-                        code=StatusCode.INTERNAL,
-                        message=String("missing request message"),
-                    ),
-                    ctx,
-                )
                 return
-            var req = msg.take()
-            ctx.request_compressed = call.last_message_compressed
+            var req = decode[Req](Span(msg.value()))
             handler(req, ctx, call)
             if ctx.abort_status:
                 call.finish(ctx.abort_status.value().copy(), ctx)
@@ -939,18 +968,8 @@ struct Server(Movable):
     def _serve_health_check(
         mut self, mut call: ServerCall, mut ctx: ServerContext
     ) raises:
-        var msg = call.recv_bytes()
-        if call.client_cancelled():
-            call.trailers_sent = True
-            return
+        var msg = _recv_single_request(call, ctx)
         if not msg:
-            call.finish(
-                Status(
-                    code=StatusCode.INTERNAL,
-                    message=String("missing request message"),
-                ),
-                ctx,
-            )
             return
         var outcome = self.health.value().check_bytes(Span(msg.value()))
         if call.deadline_blown(ctx) or call.client_cancelled():
