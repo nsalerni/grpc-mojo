@@ -325,12 +325,17 @@ def make_grpcio_probe_server(
         st = status_pb2.Status(code=code_pb2.NOT_FOUND, message="rich error")
         ctx.abort_with_status(rpc_status.to_status(st))
 
+    def fail_meta(req, ctx):
+        ctx.set_trailing_metadata((("x-error-reason", "quota"),))
+        ctx.abort(grpc.StatusCode.NOT_FOUND, "not-found")
+
     class Handler(grpc.GenericRpcHandler):
         def service(self, hcd):
             table = {"/probe.Probe/Fail": fail, "/probe.Probe/MetaEcho": meta_echo,
                      "/probe.Probe/Deadline": deadline, "/probe.Probe/Echo": echo,
                      "/probe.Probe/Sleep": sleep_5s,
-                     "/probe.Probe/FailRich": fail_rich}
+                     "/probe.Probe/FailRich": fail_rich,
+                     "/probe.Probe/FailMeta": fail_meta}
             fn = table.get(hcd.method)
             if fn is None:
                 return None
@@ -639,6 +644,14 @@ def section_grpc_client(tmp: Path):
         record("grpc", "unicode payload echo via grpcio server",
                "match=True code=0" in r.stdout, r.stdout.strip())
 
+        r = run_tool("grpc_client_probe", port, "abortmeta")
+        record(
+            "grpc",
+            "grpcio trailers-only abort metadata is trailing, not initial",
+            "initial=- trailer=quota code=5 message=not-found" in r.stdout,
+            r.stdout.strip() + r.stderr[:200],
+        )
+
         r = run_tool("grpc_client_probe", port, "richstatus")
         from google.rpc import status_pb2
         m2 = re.search(r"code=5 details=([0-9a-f]+)", r.stdout)
@@ -720,6 +733,33 @@ def section_grpc_server(tmp: Path):
         record("grpc", "mojo server trailing metadata", tmd.get("x-trailer") == "mojo-trailer", str(tmd))
         record("grpc", "mojo server binary trailing metadata (-bin, unpadded emit)",
                tmd.get("x-blob-bin") == b"\xde\xad\xbe\xef", str(tmd.get("x-blob-bin")))
+
+        try:
+            method("FailMeta")(pb.EchoRequest(message="x"), timeout=10)
+            record(
+                "grpc",
+                "abort response metadata is initial; trailers stay trailing",
+                False,
+                "no error",
+            )
+        except grpc.RpcError as e:
+            initial = dict(e.initial_metadata())
+            trailing = dict(e.trailing_metadata())
+            ok = (
+                e.code() == grpc.StatusCode.PERMISSION_DENIED
+                and e.details() == "denied"
+                and initial.get("x-request-id") == "abc123"
+                and trailing.get("x-trailer") == "t"
+                and "x-trailer" not in initial
+                and "x-request-id" not in trailing
+            )
+            record(
+                "grpc",
+                "abort response metadata is initial; trailers stay trailing",
+                ok,
+                f"initial={initial} trailing={trailing} "
+                f"code={e.code()} details={e.details()!r}",
+            )
 
         try:
             method("FailUnicode")(pb.EchoRequest(message="x"), timeout=10)
@@ -1937,7 +1977,7 @@ SECTION_TITLES = {
     "net": ("`net` vs CPython sockets",
             "1 MiB echo in both directions between grpc-mojo TCP and CPython sockets, including half-close (shutdown) and clean-EOF semantics."),
     "grpc": ("`grpc` vs grpcio",
-             "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
+             "Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, Trailers-Only error metadata, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls."),
     "grpc-tls": ("`grpc` over TLS vs grpcio",
                  "TLS connections run in both directions with strict certificate verification and h2 ALPN negotiation. Client and server identity checks cover a trusted chain, no client certificate, and an untrusted certificate. Payloads cross the reference boundary through grpcio and grpc-mojo."),
     "grpc-transport": ("`GrpcTransport` vs CPython sockets and ssl",

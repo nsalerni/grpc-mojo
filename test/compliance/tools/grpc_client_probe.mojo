@@ -157,6 +157,26 @@ def main() raises:
             sep="",
         )
 
+    elif mode == "abortmeta":
+        var req = EchoRequest()
+        req.message = "x"
+        var result = channel.unary_bytes(
+            "/probe.Probe/FailMeta", Span(encode(req)), Metadata()
+        )
+        var initial = result.initial_metadata.get("x-error-reason")
+        var trailer = result.trailing_metadata.get("x-error-reason")
+        print(
+            "initial=",
+            initial.value() if initial else String("-"),
+            " trailer=",
+            trailer.value() if trailer else String("-"),
+            " code=",
+            result.status.code,
+            " message=",
+            result.status.message,
+            sep="",
+        )
+
     elif mode == "richstatus":
         var req = EchoRequest()
         req.message = "r"
