@@ -392,6 +392,34 @@ struct GrpcChannel(Movable):
                 raise e
             raise self._abort(sid, e)
 
+    def _second_response(mut self, sid: UInt32) raises -> Bool:
+        """Reports whether a single-response call carries another message.
+
+        Reads under the call deadline until the response stream ends or a
+        second message arrives. A second message ends the call: `sid` is
+        reset unless the server already closed it.
+
+        Returns:
+            True if the server sent a second response message.
+
+        Raises:
+            `grpc: DEADLINE_EXCEEDED` on deadline expiry; otherwise on
+            framing or connection errors. Any failure resets `sid` with
+            RST_STREAM(CANCEL) before raising.
+        """
+        self._begin_step(sid)
+        var compressed = self.last_recv_compressed
+        var extra: Optional[List[Byte]]
+        try:
+            extra = self._recv_capped(sid)
+        except e:
+            raise self._abort(sid, e)
+        if not extra:
+            self.last_recv_compressed = compressed
+            return False
+        _ = self._abort(sid, Error("grpc: more than one response message"))
+        return True
+
     def start_call(
         mut self,
         path: StringSpan,
@@ -741,7 +769,8 @@ struct GrpcChannel(Movable):
         RST_STREAM(CANCEL) and DEADLINE_EXCEEDED is returned. Non-OK
         statuses are returned in the result, not raised, so callers can
         inspect trailing metadata and `Status.details_bin`. An OK status
-        with no response message is reported as INTERNAL.
+        with no response message is reported as INTERNAL, and so is a
+        second response message, which also resets the call.
 
         Args:
             path: Full method path, e.g. `/echo.Echo/Say`.
@@ -776,6 +805,18 @@ struct GrpcChannel(Movable):
             had_msg = Bool(msg)
             if msg:
                 response = msg.take()
+                if self._second_response(sid):
+                    return CallResult(
+                        status=Status(
+                            code=StatusCode.INTERNAL,
+                            message=String("more than one response message"),
+                        ),
+                        initial_metadata=Metadata.from_headers(
+                            Span(self.conn.streams[sid].headers)
+                        ),
+                        trailing_metadata=Metadata(),
+                        response=List[Byte](),
+                    )
             result = self.finish(sid)
         except e:
             var failure = self._abort(sid, e)
@@ -1060,12 +1101,18 @@ struct ClientStreamingCall[Req: ProtoMessage, Resp: ProtoMessage](Movable):
 
         Raises:
             `grpc: DEADLINE_EXCEEDED` on deadline expiry; the call's
-            `Status` when it is not OK; or if the server sent no response
+            `Status` when it is not OK; INTERNAL if the server sent more
+            than one response message; or if the server sent no response
             message.
         """
         self.close_send()
         self._channel[].deadline_ns = self._deadline_ns
         var msg = self._channel[].recv_msg[Self.Resp](self.sid)
+        if msg and self._channel[]._second_response(self.sid):
+            raise Status(
+                code=StatusCode.INTERNAL,
+                message=String("more than one response message"),
+            ).to_error()
         var result = self._channel[].finish(self.sid)
         if not result.status.is_ok():
             raise result.status.to_error()

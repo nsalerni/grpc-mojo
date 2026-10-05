@@ -729,6 +729,27 @@ def test_missing_request_message() raises:
     rig.server_conn.close()
 
 
+def test_multiple_request_messages() raises:
+    # Unary and server-streaming calls take exactly one request message;
+    # a second one fails the call before the handler runs.
+    var paths = [String("/echo.Echo/Say"), String("/echo.Echo/Denied")]
+    for i in range(len(paths)):
+        var rig = make_e2e_rig()
+        var sid = rig.channel.start_call(paths[i], Metadata())
+        var req = encode(EchoRequest(message="x"))
+        rig.channel.send_request_bytes(sid, Span(req), last=False)
+        rig.channel.send_request_bytes(sid, Span(req), last=True)
+        rig.pump_until_reply()
+        var result = rig.channel.finish(sid)
+        assert_equal(result.status.code, StatusCode.INTERNAL, paths[i])
+        assert_true(
+            "multiple messages" in result.status.message,
+            result.status.message,
+        )
+        rig.channel.close()
+        rig.server_conn.close()
+
+
 def test_user_agent_and_dispatch_idempotency() raises:
     var rig = make_e2e_rig()
     var sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
@@ -905,6 +926,12 @@ def fork_silent_handler(mut ctx: ServerContext, mut call: ServerCall) raises:
     pass
 
 
+def fork_twice_handler(mut ctx: ServerContext, mut call: ServerCall) raises:
+    # Finishes OK after two response messages.
+    call.send(ctx, EchoResponse(message="one"))
+    call.send(ctx, EchoResponse(message="two"))
+
+
 def test_public_unary_api() raises:
     var listener = TCPListener("127.0.0.1", 0)
     var port = listener.local_port
@@ -916,6 +943,8 @@ def test_public_unary_api() raises:
         server.register_unary[fork_notfound_handler]("/echo.Echo/Missing")
         server.register_unary[fork_details_handler]("/echo.Echo/Details")
         server.register_bidi[fork_silent_handler]("/echo.Echo/Silent")
+        server.register_bidi[fork_twice_handler]("/echo.Echo/Twice")
+        server.register_unary[gzip_echo_handler]("/echo.Echo/Gzip")
         try:
             var tcp = listener.accept()
             var transport = GrpcTransport.plaintext(tcp^)
@@ -936,6 +965,14 @@ def test_public_unary_api() raises:
         "/echo.Echo/Say", EchoRequest(message="hi"), timeout_ns=5_000_000_000
     )
     assert_equal(resp.message, "echo: hi")
+    assert_false(channel.last_recv_compressed)
+
+    # The response's Compressed-Flag is still visible after the call ends.
+    resp = channel.unary[EchoRequest, EchoResponse](
+        "/echo.Echo/Gzip", EchoRequest(message="gz"), timeout_ns=5_000_000_000
+    )
+    assert_equal(resp.message, "gz")
+    assert_true(channel.last_recv_compressed, "response Compressed-Flag is 1")
 
     # Typed unary raises Status.to_error() on a non-OK status.
     var raised = False
@@ -972,6 +1009,26 @@ def test_public_unary_api() raises:
     assert_equal(r2.status.code, StatusCode.INTERNAL)
     assert_true("no response message" in r2.status.message, r2.status.message)
 
+    # OK with a second response message is INTERNAL, not the first message.
+    var r3 = channel.unary_bytes(
+        "/echo.Echo/Twice",
+        Span(encode(EchoRequest(message="x"))),
+        Metadata(),
+        timeout_ns=5_000_000_000,
+    )
+    assert_equal(r3.status.code, StatusCode.INTERNAL)
+    assert_true(
+        "more than one response message" in r3.status.message,
+        r3.status.message,
+    )
+    assert_equal(len(r3.response), 0)
+
+    # The channel still serves the next call.
+    resp = channel.unary[EchoRequest, EchoResponse](
+        "/echo.Echo/Say", EchoRequest(message="again"), timeout_ns=5_000_000_000
+    )
+    assert_equal(resp.message, "echo: again")
+
     channel.close()
     _ = external_call["kill", c_int](pid, c_int(9))
 
@@ -997,6 +1054,7 @@ def main() raises:
     test_malformed_grpc_timeout_fails_call_only()
     test_content_type_gate_415()
     test_missing_request_message()
+    test_multiple_request_messages()
     test_user_agent_and_dispatch_idempotency()
     test_cancel_marks_stream()
     test_streaming_abort()

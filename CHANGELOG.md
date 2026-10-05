@@ -14,6 +14,14 @@
   the deadline, so the next call on the channel does not hit
   `MAX_CONCURRENT_STREAMS` behind it. `finish` half-closes a request
   stream the server ended first.
+- Single-message sides of a call are enforced. The blocking `Server`
+  waits for the client to half-close before running a unary,
+  server-streaming, or health Check handler, and fails a call with a
+  second request message as INTERNAL, as `PollingServer` already did.
+  `unary_bytes` reports a second response message as INTERNAL and
+  `ClientStreamingCall.finish` raises it, resetting the stream; before,
+  the first message was returned and the rest dropped, or `finish`
+  waited out the deadline on a stream the server kept open.
 
 ## 0.2.7 - 2026-09-21
 
