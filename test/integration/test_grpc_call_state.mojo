@@ -190,8 +190,44 @@ def test_finish_closes_our_side() raises:
     rig.server_conn.close()
 
 
+def test_second_response_message_fails_the_call() raises:
+    # A client-streaming call has one response message. The server sends a
+    # second one and keeps the stream open: the call fails INTERNAL and is
+    # reset so the next call gets the only stream slot.
+    var rig = make_rig(max_concurrent_streams=1)
+    var call = ClientStreamingCall[EchoRequest, EchoResponse].start(
+        rig.channel, "/echo.Echo/Join", timeout_ns=5_000_000_000
+    )
+    call.send(EchoRequest(message="a"))
+    rig.pump_until_headers(call.sid)
+    var reply = frame_message(Span(encode(EchoResponse(message="a"))))
+    var two = reply.copy()
+    two.extend(Span(reply))
+    rig.respond(call.sid, Span(two), end=False)
+    var err = String("<no error>")
+    try:
+        _ = call.finish()
+    except e:
+        err = String(e)
+    assert_true("INTERNAL" in err, err)
+    assert_true("more than one response message" in err, err)
+    assert_equal(rig.channel.deadline_ns, 0)
+    assert_equal(rig.pump_until_reset(call.sid), ERR_CANCEL)
+
+    var next = rig.channel.start_call("/echo.Echo/Say", Metadata())
+    rig.channel.send_msg[EchoRequest](next, EchoRequest(message="b"), last=True)
+    rig.pump_until_headers(next)
+    rig.respond(next, Span(reply), end=True)
+    assert_true(Bool(rig.channel.recv_msg[EchoResponse](next)))
+    var result = rig.channel.finish(next)
+    assert_true(result.status.is_ok(), result.status.message)
+    rig.channel.close()
+    rig.server_conn.close()
+
+
 def main() raises:
     test_blocked_send_uses_its_own_deadline()
     test_failed_recv_frees_the_stream()
     test_finish_closes_our_side()
+    test_second_response_message_fails_the_call()
     print("test_grpc_call_state: all tests passed")
