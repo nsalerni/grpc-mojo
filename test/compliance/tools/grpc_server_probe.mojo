@@ -12,7 +12,7 @@ from std.sys import argv
 
 from common import to_hex
 from echo_pb import EchoRequest, EchoResponse
-from grpc import Server, ServerContext
+from grpc import Server, ServerContext, StatusCode
 
 
 def echo(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
@@ -79,6 +79,13 @@ def fail_unicode(
     raise Error("falhou: résumé 100% 🔥")
 
 
+def fail_meta(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
+    ctx.response_metadata.add(String("x-request-id"), String("abc123"))
+    ctx.response_trailers.add(String("x-trailer"), String("t"))
+    ctx.abort(StatusCode.PERMISSION_DENIED, String("denied"))
+    return EchoResponse()
+
+
 def fail_rich(req: EchoRequest, mut ctx: ServerContext) raises -> EchoResponse:
     # google.rpc.Status{code: 5, message: "rich"} hand-encoded.
     var details: List[Byte] = [0x08, 0x05, 0x12, 0x04, 0x72, 0x69, 0x63, 0x68]
@@ -107,5 +114,6 @@ def main() raises:
     server.register_unary[peer_certificate]("/probe.Probe/PeerCertificate")
     server.register_unary[meta_echo]("/probe.Probe/MetaEcho")
     server.register_unary[fail_unicode]("/probe.Probe/FailUnicode")
+    server.register_unary[fail_meta]("/probe.Probe/FailMeta")
     server.register_unary[fail_rich]("/probe.Probe/FailRich")
     server.serve()

@@ -28,9 +28,10 @@ item 7). `Server.dispatch_ready` is the seam where concurrency will land.
 Protocol conduct per
 [PROTOCOL-HTTP2.md](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md):
 non-gRPC content types get an HTTP 415, unknown methods get UNIMPLEMENTED,
-immediate errors use Trailers-Only responses, a blown `grpc-timeout`
-deadline turns an otherwise-OK finish into DEADLINE_EXCEEDED, and handler
-exceptions surface as UNKNOWN.
+immediate errors use Trailers-Only responses when response metadata is
+empty, and send that metadata as initial headers first when it is set. A
+blown `grpc-timeout` deadline turns an otherwise-OK finish into
+DEADLINE_EXCEEDED, and handler exceptions surface as UNKNOWN.
 """
 
 from std.time import monotonic
@@ -362,12 +363,15 @@ struct ServerCall(Movable):
     def finish(mut self, status: Status, ctx: ServerContext) raises:
         """Sends trailers (or Trailers-Only) exactly once.
 
-        When no response headers have gone out yet, emits a Trailers-Only
-        response: a single HEADERS block carrying `:status 200`, the
-        content type, and the status trailers. The trailers carry
-        `grpc-status`, a percent-encoded `grpc-message` when non-empty, a
-        base64-coded `grpc-status-details-bin` for non-OK statuses with
-        details, and the handler's `ctx.response_trailers`. Idempotent.
+        When no response headers have gone out yet and
+        `ctx.response_metadata` is empty, emits a Trailers-Only response:
+        a single HEADERS block carrying `:status 200`, the content type,
+        and the status trailers. When that metadata is set, sends it in
+        the initial HEADERS first, then a normal trailers block. The
+        trailers carry `grpc-status`, a percent-encoded `grpc-message`
+        when non-empty, a base64-coded `grpc-status-details-bin` for
+        non-OK statuses with details, and the handler's
+        `ctx.response_trailers`. Idempotent.
 
         Args:
             status: The final call status.
@@ -378,6 +382,8 @@ struct ServerCall(Movable):
         """
         if self.trailers_sent:
             return
+        if not self.headers_sent and len(ctx.response_metadata) > 0:
+            self.send_headers_once(ctx)
         self.trailers_sent = True
         var trailers = List[HeaderField]()
         if not self.headers_sent:

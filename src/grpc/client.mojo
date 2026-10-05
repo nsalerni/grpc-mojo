@@ -640,6 +640,8 @@ struct GrpcChannel(Movable):
         `grpc-status-details-bin` from the trailers — or from the only
         HEADERS block of a Trailers-Only response — and maps RST_STREAM or
         bare HTTP errors to gRPC codes when the server sent no status.
+        Custom metadata on that Trailers-Only block is `trailing_metadata`.
+        `initial_metadata` stays empty unless a separate header block arrived.
 
         If the server ended the call while the request stream was still
         open, the request stream is half-closed so the call stops holding a
@@ -671,9 +673,17 @@ struct GrpcChannel(Movable):
         var initial = Metadata()
         var trailing = Metadata()
         if self.conn.streams[sid].headers_done:
-            initial = Metadata.from_headers(
-                Span(self.conn.streams[sid].headers)
+            var header_status = self._find_header(
+                Span(self.conn.streams[sid].headers), "grpc-status"
             )
+            if not self.conn.streams[sid].trailers_done and header_status:
+                trailing = Metadata.from_headers(
+                    Span(self.conn.streams[sid].headers)
+                )
+            else:
+                initial = Metadata.from_headers(
+                    Span(self.conn.streams[sid].headers)
+                )
         if self.conn.streams[sid].trailers_done:
             trailing = Metadata.from_headers(
                 Span(self.conn.streams[sid].trailers)

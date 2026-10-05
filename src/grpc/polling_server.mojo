@@ -1349,10 +1349,23 @@ struct PollingServer(Movable):
 
         if connection.response_status.code != StatusCode.OK:
             if not connection.trailers_queued:
+                var trailers_only = True
+                if (
+                    not connection.headers_queued
+                    and len(connection.ctx.response_metadata) > 0
+                ):
+                    var headers = _initial_headers(connection.ctx)
+                    connection.h2.queue_headers(
+                        connection.active_sid,
+                        Span(headers),
+                        end_stream=False,
+                    )
+                    connection.headers_queued = True
+                    trailers_only = False
                 var trailers = _status_headers(
                     connection.response_status,
                     connection.ctx,
-                    trailers_only=True,
+                    trailers_only=trailers_only,
                 )
                 connection.h2.queue_headers(
                     connection.active_sid, Span(trailers), end_stream=True
