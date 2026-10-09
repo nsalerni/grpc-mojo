@@ -2,16 +2,16 @@
   "dir": "packages",
   "deps": {
     "mojo-net": {
-      "ref": "v0.2.7"
+      "ref": "v0.2.8"
     },
     "protomojo": {
-      "ref": "v0.4.3"
+      "ref": "v0.4.4"
     },
     "mojo-http2": {
-      "ref": "v0.2.9"
+      "ref": "v0.2.10"
     },
     "mojo-tls": {
-      "ref": "v0.3.3"
+      "ref": "v0.3.4"
     }
   }
 }
