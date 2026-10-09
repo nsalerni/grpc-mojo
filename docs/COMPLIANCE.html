@@ -85,15 +85,15 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <header>
 <p class="eyebrow">grpc-mojo &middot; differential compliance run</p>
 <h1>Every layer, checked against the reference implementation</h1>
-<div class="verdict"><span class="score">316/316</span><span>checks passed</span><span class="when">2026-08-25 23:27 UTC</span></div>
+<div class="verdict"><span class="score">324/324</span><span>checks passed</span><span class="when">2026-10-09 18:25 UTC</span></div>
 <p class="thesis">No self-grading: protobuf binary and JSON behavior is judged by Python <code>protobuf</code> and Google&rsquo;s official conformance runner, header compression by python-hpack, HTTP/2 by hyper-h2 (which rejects any protocol violation), sockets by CPython, and gRPC behavior by <code>grpcio</code> in both directions. The proto, hpack, h2, and net sections run in each package&rsquo;s own compliance suite and are aggregated here.</p>
 <ul class="scorecard">
 <li>proto <span class="n">92/92</span></li>
 <li>hpack <span class="n">5/5</span></li>
 <li>h2 <span class="n">21/21</span></li>
-<li>net <span class="n">11/11</span></li>
-<li>tls <span class="n">32/32</span></li>
-<li>grpc <span class="n">24/24</span></li>
+<li>net <span class="n">15/15</span></li>
+<li>tls <span class="n">34/34</span></li>
+<li>grpc <span class="n">26/26</span></li>
 <li>grpc-tls <span class="n">16/16</span></li>
 <li>grpc-transport <span class="n">2/2</span></li>
 <li>grpc-polling <span class="n">12/12</span></li>
@@ -255,6 +255,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>Poller readiness sequence matches CPython selectors</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>ReadinessStream TCP partial I/O matches CPython sockets</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>ReadinessStream Unix partial I/O matches CPython AF_UNIX</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>TCP IPv4 local and peer addresses match CPython socket names</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>TCP IPv6 local and peer addresses match CPython socket names</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Unix local and peer paths match CPython socket names</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>accepted TCP streams match explicit CPython blocking modes</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">tls</span> <span class="vs">vs</span> CPython ssl</h2>
@@ -293,10 +297,12 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>truncated TLS transport is rejected by Mojo and CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>fatal session teardown does not contaminate the next nonblocking TLS session</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>reset peers with rejected ALPN do not terminate the server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>Mojo client resumes a TLS 1.3 ticket against CPython</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>CPython client resumes a TLS 1.3 ticket against Mojo</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
 <h2><span class="pkg">grpc</span> <span class="vs">vs</span> grpcio</h2>
-<p class="method">Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls.</p>
+<p class="method">Behavioral compliance against the reference gRPC implementation in both directions: status-code mapping (all 16 codes), unicode/percent status details, ascii and binary (-bin) metadata in requests, initial response metadata and trailers, Trailers-Only error metadata, deadline (grpc-timeout) propagation, empty and 1 MB messages, sequential calls.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
 <tr><td>status-code mapping, all 16 codes + unicode/percent details</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -309,6 +315,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>1MB unary echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>empty message echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>unicode payload echo via grpcio server</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>grpcio trailers-only abort metadata is trailing, not initial</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>rich error model: grpc-status-details-bin decoded from grpcio</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>client deadline enforced vs sleeping server (300ms -&gt; DEADLINE_EXCEEDED)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>grpcio client: 1MB echo through mojo server</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -319,6 +326,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>mojo server initial response metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo server trailing metadata</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo server binary trailing metadata (-bin, unpadded emit)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>abort response metadata is initial; trailers stay trailing</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo handler error -&gt; grpcio UNKNOWN + unicode details</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>mojo server rich error (grpc-status-details-bin)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>unknown method -&gt; UNIMPLEMENTED trailers-only</td><td class="result"><span class="pass">PASS</span></td></tr>
@@ -490,7 +498,7 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <p class="method">The repo's unit tests are themselves reference-anchored: protobuf goldens generated by Python protobuf, all RFC 7541 Appendix C vectors, and the grpcio interop suite.</p>
 <div class="tablewrap"><table>
 <tr><th>Check</th><th>Result</th></tr>
-<tr><td>unit test files (30/30 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
+<tr><td>unit test files (41/41 test files passed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 <tr><td>interop suite (interop: 7 passed, 0 failed)</td><td class="result"><span class="pass">PASS</span></td></tr>
 </table></div></section>
 <section>
@@ -512,10 +520,10 @@ code { font-family: var(--mono); font-size: 0.92em; }
 <tr><td>hpack (reference for hpack)</td><td>4.2.0</td></tr>
 <tr><td>h2/hyper-h2 (reference for h2)</td><td>4.4.1</td></tr>
 <tr><td>hyperframe (reference for h2 frames)</td><td>6.1.0</td></tr>
-<tr><td>platform</td><td>Darwin 27.0.0 arm64</td></tr>
+<tr><td>platform</td><td>Linux 6.12.94+ x86_64</td></tr>
 </table></div></section>
 <section class="gaps"><h2>Known gaps (tracked, not silent)</h2><ul>
-<li><strong>Compression</strong>: mojo-zlib exists, but grpc-encoding gzip integration remains pending (PRIMITIVES.md #4). Published mojo-zlib depends on nightly Mojo, not 1.0. Compressed messages are rejected, never mis-decoded.</li>
+<li><strong>Compression</strong>: gzip ships via a zlib C shim (PRIMITIVES.md #4). Unknown encodings are UNIMPLEMENTED. A 1.0-compatible mojo-zlib remains a partner goal so the shim can be dropped.</li>
 <li><strong>Concurrency</strong>: PollingServer overlaps bounded h2c or TLS connection I/O; handlers remain serialized. Streaming handlers run to completion on the poll thread (PRIMITIVES.md #7).</li>
 <li><strong>Control plane</strong>: Keepalive PINGs on the blocking Server wait on Mojo threads or a public async runtime. PollingServer.request_stop() sends GOAWAY and drains on the event-loop thread. Configurable HTTP/2 initial_window_size already ships.</li>
 <li><strong>hpack value encoding</strong>: header values are UTF-8 Strings; arbitrary octets are out of scope for now (gRPC uses base64 -bin metadata).</li>
