@@ -59,7 +59,7 @@ from .status import (
 from .timeout import encode_timeout
 from .transport import GrpcTransport
 
-comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.2.7"
+comptime GRPC_MOJO_USER_AGENT = "grpc-mojo/0.2.8"
 """Value sent in the user-agent request header."""
 
 

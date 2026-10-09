@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.8 - 2026-10-09
+
 - Custom metadata on a Trailers-Only response is `trailing_metadata`.
   `GrpcChannel.finish` leaves `initial_metadata` empty when the only
   HEADERS block carries `grpc-status`. `ServerCall.finish` and
@@ -28,7 +30,16 @@
   `unary_bytes` reports a second response message as INTERNAL and
   `ClientStreamingCall.finish` raises it, resetting the stream; before,
   the first message was returned and the rest dropped, or `finish`
-  waited out the deadline on a stream the server kept open.
+  waited out the deadline on a stream the server kept open. The extra
+  read restores `last_recv_compressed` when no second message arrives, so
+  a unary caller still sees that the response was gzip-compressed.
+- `decode_timeout` requires ASCII digits before the unit. A sign, spaces,
+  or underscores no longer decode as a deadline. Leading zeros such as
+  `05S` still decode.
+- Source checkouts and the package test use mojo-net 0.2.8, mojo-http2
+  0.2.10, mojo-tls 0.3.4, and protomojo 0.4.4. Conda lower bounds stay
+  mojo-net and mojo-http2 `>=0.2.7`, mojo-tls `>=0.3.3`, and protomojo
+  `>=0.4.3`. `user-agent` is `grpc-mojo/0.2.8`.
 
 ## 0.2.7 - 2026-09-21
 
