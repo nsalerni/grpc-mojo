@@ -31,7 +31,9 @@ non-gRPC content types get an HTTP 415, unknown methods get UNIMPLEMENTED,
 immediate errors use Trailers-Only responses when response metadata is
 empty, and send that metadata as initial headers first when it is set. A
 blown `grpc-timeout` deadline turns an otherwise-OK finish into
-DEADLINE_EXCEEDED, and handler exceptions surface as UNKNOWN.
+DEADLINE_EXCEEDED. Handler exceptions surface as UNKNOWN. Compression
+failures (a bad Compressed-Flag, flag 1 without `grpc-encoding: gzip`,
+or a gzip body that will not inflate) surface as INTERNAL.
 """
 
 from std.time import monotonic
@@ -47,7 +49,7 @@ from .framing import (
     recv_message_flag,
     send_message,
 )
-from .gzip import encoding_is_supported
+from .gzip import encoding_is_supported, headers_accept_gzip
 from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
 from .reflection import (
@@ -111,7 +113,13 @@ struct ServerContext(Movable):
     """True when the most recent received request message was gzip'd."""
     var compress_response: Bool
     """When True, response messages are gzip-compressed and the call
-    advertises `grpc-encoding: gzip`."""
+    advertises `grpc-encoding: gzip`, if the client accepts gzip."""
+    var client_accepts_gzip: Bool
+    """True when the request's `grpc-accept-encoding` lists gzip.
+
+    Dispatch sets this from the header block. A missing header is false:
+    the client accepts identity only, and `compress_response` is ignored.
+    """
 
     def __init__(out self, peer_certificate: Optional[PeerCertificate] = None):
         """Constructs an empty context; dispatch fills the request fields.
@@ -132,6 +140,7 @@ struct ServerContext(Movable):
         self.stop_server = False
         self.request_compressed = False
         self.compress_response = False
+        self.client_accepts_gzip = False
 
     def abort(mut self, code: Int, var message: String):
         """Ends the call with a specific status once the handler returns.
@@ -262,9 +271,9 @@ struct ServerCall(Movable):
         """Sends the initial response HEADERS if not already sent.
 
         Emits `:status 200`, the gRPC content type, `grpc-accept-encoding:
-        gzip`, optional `grpc-encoding: gzip`, and the handler's
-        `ctx.response_metadata`. Idempotent; the message send paths call it
-        implicitly, so handlers rarely need to.
+        gzip`, optional `grpc-encoding: gzip` when the client accepts gzip,
+        and the handler's `ctx.response_metadata`. Idempotent; the message
+        send paths call it implicitly, so handlers rarely need to.
 
         Args:
             ctx: The call context supplying response metadata.
@@ -289,7 +298,7 @@ struct ServerCall(Movable):
                 name=String("grpc-accept-encoding"), value=String("gzip")
             )
         )
-        if compress or ctx.compress_response:
+        if _response_gzip(ctx, compress):
             headers.append(
                 HeaderField(name=String("grpc-encoding"), value=String("gzip"))
             )
@@ -312,7 +321,8 @@ struct ServerCall(Movable):
             ctx: The call context supplying response metadata.
             payload: The serialized message bytes.
             compress: When True, gzip-compress this message. Also
-                implied by `ctx.compress_response`.
+                implied by `ctx.compress_response`. Either request is
+                ignored unless `ctx.client_accepts_gzip` is set.
 
         Raises:
             If `payload` exceeds `max_message_size`, or on connection I/O
@@ -321,7 +331,7 @@ struct ServerCall(Movable):
         if len(payload) > self.max_message_size:
             self._oversized_message = True
             raise Error("grpc: message exceeds max size")
-        var use_gzip = compress or ctx.compress_response
+        var use_gzip = _response_gzip(ctx, compress)
         self.send_headers_once(ctx, compress=use_gzip)
         send_message(
             self._conn[],
@@ -524,6 +534,43 @@ def _find_header(
         if f.name == String(name):
             return f.value.copy()
     return None
+
+
+def _response_gzip(ctx: ServerContext, compress: Bool) -> Bool:
+    """Reports whether a response message should be sent gzip'd.
+
+    Args:
+        ctx: The call context, including whether the client accepts gzip.
+        compress: Per-message request to gzip, independent of
+            `ctx.compress_response`.
+
+    Returns:
+        True when gzip was requested and the client listed gzip in
+        `grpc-accept-encoding`.
+    """
+    return ctx.client_accepts_gzip and (compress or ctx.compress_response)
+
+
+def _failure_code(message: String, oversized: Bool) -> Int:
+    """Maps a dispatch exception to a gRPC status code.
+
+    Args:
+        message: The exception text.
+        oversized: True when the call hit the configured message cap.
+
+    Returns:
+        `RESOURCE_EXHAUSTED` for an oversized message, `INTERNAL` for a
+        compression or compressed-flag failure, otherwise `UNKNOWN`.
+    """
+    if oversized or message == "grpc: message exceeds max size":
+        return StatusCode.RESOURCE_EXHAUSTED
+    if (
+        message == "grpc: invalid compressed flag"
+        or message == "grpc: compressed flag requires grpc-encoding: gzip"
+        or message == "grpc: gzip decompress failed"
+    ):
+        return StatusCode.INTERNAL
+    return StatusCode.UNKNOWN
 
 
 struct Server(Movable):
@@ -892,6 +939,7 @@ struct Server(Movable):
             return
 
         var ctx = ServerContext(self._peer_certificate)
+        ctx.client_accepts_gzip = headers_accept_gzip(Span(headers))
         var path = _find_header(Span(headers), ":path")
         if path:
             ctx.path = path.value()
@@ -929,9 +977,7 @@ struct Server(Movable):
             except e:
                 if not call.trailers_sent:
                     var message = String(e)
-                    var code = StatusCode.UNKNOWN
-                    if call._oversized_message:
-                        code = StatusCode.RESOURCE_EXHAUSTED
+                    var code = _failure_code(message, call._oversized_message)
                     call.finish(Status(code=code, message=message), ctx)
             return
 
@@ -941,9 +987,7 @@ struct Server(Movable):
             except e:
                 if not call.trailers_sent:
                     var message = String(e)
-                    var code = StatusCode.UNKNOWN
-                    if call._oversized_message:
-                        code = StatusCode.RESOURCE_EXHAUSTED
+                    var code = _failure_code(message, call._oversized_message)
                     call.finish(Status(code=code, message=message), ctx)
             return
 
@@ -961,14 +1005,12 @@ struct Server(Movable):
         try:
             handler(call, ctx)
         except e:
-            # Handler errors surface as UNKNOWN, like other gRPC servers.
-            # Oversized messages use RESOURCE_EXHAUSTED, matching
-            # PollingServer and the usual gRPC admission code.
+            # Handler errors surface as UNKNOWN. Oversized messages are
+            # RESOURCE_EXHAUSTED. Compression and compressed-flag failures
+            # are INTERNAL, matching PollingServer.
             if not call.trailers_sent:
                 var message = String(e)
-                var code = StatusCode.UNKNOWN
-                if call._oversized_message:
-                    code = StatusCode.RESOURCE_EXHAUSTED
+                var code = _failure_code(message, call._oversized_message)
                 call.finish(Status(code=code, message=message), ctx)
 
     def _serve_health_check(

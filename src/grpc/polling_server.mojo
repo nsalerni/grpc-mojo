@@ -61,7 +61,12 @@ from proto import ProtoMessage, decode, encode
 from tls import PeerCertificate, TLSContext, TLSHandshake
 
 from .framing import GRPC_MESSAGE_PREFIX_LEN, frame_message
-from .gzip import encoding_is_supported, gzip_compress, gzip_decompress
+from .gzip import (
+    encoding_is_supported,
+    gzip_compress,
+    gzip_decompress,
+    headers_accept_gzip,
+)
 from .health import HEALTH_CHECK_PATH, Health
 from .metadata import Metadata, encode_bin_value
 from .reflection import (
@@ -550,7 +555,7 @@ def _initial_headers(ctx: ServerContext) -> List[HeaderField]:
     headers.append(
         HeaderField(name=String("grpc-accept-encoding"), value=String("gzip"))
     )
-    if ctx.compress_response:
+    if ctx.client_accepts_gzip and ctx.compress_response:
         headers.append(
             HeaderField(name=String("grpc-encoding"), value=String("gzip"))
         )
@@ -1099,6 +1104,7 @@ struct PollingServer(Movable):
         connection.active_sid = sid
         connection.call_start_ns = Int64(monotonic())
         connection.ctx = ServerContext(connection.peer_certificate)
+        connection.ctx.client_accepts_gzip = headers_accept_gzip(Span(headers))
 
         var method = _find_header(Span(headers), ":method")
         if not method or method.value() != "POST":
@@ -1205,12 +1211,29 @@ struct PollingServer(Movable):
                 connection.request_length = Int(
                     get_u32_be(Span(connection.prefix), 1)
                 )
+                var encoding = _find_header(
+                    Span(connection.h2.streams[sid].headers), "grpc-encoding"
+                )
+                var encoding_value = String()
+                if encoding:
+                    encoding_value = encoding.value()
                 if flag > 1:
                     self._set_request_error(
                         connection,
                         Status(
                             code=StatusCode.INTERNAL,
                             message=String("invalid compressed flag"),
+                        ),
+                    )
+                elif flag == 1 and encoding_value != "gzip":
+                    self._set_request_error(
+                        connection,
+                        Status(
+                            code=StatusCode.INTERNAL,
+                            message=String(
+                                "grpc: compressed flag requires grpc-encoding:"
+                                " gzip"
+                            ),
                         ),
                     )
                 elif connection.request_length > self.config.max_message_size:
@@ -1221,9 +1244,17 @@ struct PollingServer(Movable):
                             message=String("request message exceeds max size"),
                         ),
                     )
-                elif connection.request_length == 0:
+                elif connection.request_length == 0 and flag == 0:
                     connection.request_complete = True
                     connection.ctx.request_compressed = False
+                elif connection.request_length == 0:
+                    self._set_request_error(
+                        connection,
+                        Status(
+                            code=StatusCode.INTERNAL,
+                            message=String("grpc: gzip decompress failed"),
+                        ),
+                    )
                 else:
                     connection.request_compressed = flag == 1
             return connection.h2.pending_output_len() > 0
@@ -1307,7 +1338,10 @@ struct PollingServer(Movable):
                     code=StatusCode.RESOURCE_EXHAUSTED,
                     message=String("response message exceeds max size"),
                 )
-            elif connection.ctx.compress_response:
+            elif (
+                connection.ctx.client_accepts_gzip
+                and connection.ctx.compress_response
+            ):
                 var gz = gzip_compress(Span(payload))
                 connection.response = frame_message(Span(gz), compressed=True)
                 connection.response_status = Status.ok()
@@ -1632,9 +1666,8 @@ struct PollingServer(Movable):
             connection.reset_call()
             return
 
-        if (
-            connection.ctx.path in self.streaming_routes
-            or (self.reflection and is_reflection_path(connection.ctx.path))
+        if connection.ctx.path in self.streaming_routes or (
+            self.reflection and is_reflection_path(connection.ctx.path)
         ):
             self._drive_streaming(connection)
             return

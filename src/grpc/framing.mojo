@@ -17,8 +17,10 @@ Message-Length, then the message bytes. DATA frame boundaries carry no
 meaning; messages are parsed from the stream's buffered bytes, and one
 message may span many frames (or share a frame with its neighbors).
 
-When the Compressed-Flag is 1, the message body is gzip (RFC 1952),
-negotiated with `grpc-encoding` / `grpc-accept-encoding`.
+When the Compressed-Flag is 1, the message body is gzip (RFC 1952) and
+the call's `grpc-encoding` header must be `gzip`. Flag 1 with the header
+omitted or set to anything else is an error. Flag 0 is always identity,
+even when `grpc-encoding` is `gzip`.
 """
 
 from h2 import Http2Connection, get_u32_be
@@ -96,8 +98,9 @@ def recv_message(
 ) raises -> Optional[List[Byte]]:
     """Reads one length-prefixed message from the stream.
 
-    A Compressed-Flag of 1 is gunzip'd. See `recv_message_flag` to
-    observe whether the wire flag was set.
+    A Compressed-Flag of 1 is gunzip'd when the stream's `grpc-encoding`
+    is `gzip`. See `recv_message_flag` to observe whether the wire flag
+    was set.
 
     Args:
         conn: The HTTP/2 connection to read from.
@@ -111,7 +114,8 @@ def recv_message(
 
     Raises:
         On a truncated prefix or body, an invalid compressed flag, a
-        gzip failure, an oversized message, or connection errors.
+        compressed message whose `grpc-encoding` is not gzip, a gzip
+        failure, an oversized message, or connection errors.
     """
     var compressed = False
     return recv_message_flag(
@@ -141,7 +145,8 @@ def recv_message_flag(
 
     Raises:
         On a truncated prefix or body, an invalid compressed flag, a
-        gzip failure, an oversized message, or connection errors.
+        compressed message whose `grpc-encoding` is not gzip, a gzip
+        failure, an oversized message, or connection errors.
     """
     compressed = False
     if not conn.wait_data(stream_id, GRPC_MESSAGE_PREFIX_LEN):
@@ -155,6 +160,16 @@ def recv_message_flag(
     var length = Int(get_u32_be(Span(prefix), 1))
     if length > max_size:
         raise Error("grpc: message exceeds max size")
+    if flag == 1:
+        var encoding = String()
+        if conn.streams[stream_id].headers_done:
+            var headers = conn.streams[stream_id].headers.copy()
+            for field in headers:
+                if field.name == "grpc-encoding":
+                    encoding = field.value.copy()
+                    break
+        if encoding != "gzip":
+            raise Error("grpc: compressed flag requires grpc-encoding: gzip")
     # Drain incrementally: stream flow-control credit is granted on
     # consumption, so messages larger than the window must be consumed
     # as they arrive.

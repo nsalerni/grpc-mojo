@@ -1,8 +1,10 @@
 # Unit tests for the pure-function parts of the grpc package.
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from common import from_hex, to_hex
+from grpc.gzip import accept_encoding_allows_gzip, headers_accept_gzip
+from hpack import HeaderField
 from grpc import (
     Metadata,
     Status,
@@ -104,6 +106,54 @@ def test_message_framing() raises:
     assert_equal(to_hex(empty), "0000000000")
 
 
+def test_accept_encoding() raises:
+    assert_false(accept_encoding_allows_gzip(""))
+    assert_false(accept_encoding_allows_gzip("identity"))
+    assert_false(accept_encoding_allows_gzip("gzip2"))
+    assert_false(accept_encoding_allows_gzip("GZIP"))
+    assert_true(accept_encoding_allows_gzip("gzip"))
+    assert_true(accept_encoding_allows_gzip("identity,gzip"))
+    assert_true(accept_encoding_allows_gzip("identity, gzip"))
+    assert_true(accept_encoding_allows_gzip(" identity , gzip "))
+    assert_true(accept_encoding_allows_gzip("\tgzip\t"))
+    assert_true(accept_encoding_allows_gzip("deflate,gzip"))
+
+    var missing = List[HeaderField]()
+    missing.append(
+        HeaderField(
+            name=String("content-type"), value=String("application/grpc")
+        )
+    )
+    assert_false(headers_accept_gzip(Span(missing)))
+
+    var identity = List[HeaderField]()
+    identity.append(
+        HeaderField(
+            name=String("grpc-accept-encoding"), value=String("identity")
+        )
+    )
+    assert_false(headers_accept_gzip(Span(identity)))
+
+    var listed = List[HeaderField]()
+    listed.append(
+        HeaderField(
+            name=String("grpc-accept-encoding"), value=String("identity, gzip")
+        )
+    )
+    assert_true(headers_accept_gzip(Span(listed)))
+
+    var split = List[HeaderField]()
+    split.append(
+        HeaderField(
+            name=String("grpc-accept-encoding"), value=String("identity")
+        )
+    )
+    split.append(
+        HeaderField(name=String("grpc-accept-encoding"), value=String("gzip"))
+    )
+    assert_true(headers_accept_gzip(Span(split)))
+
+
 def test_code_mappings() raises:
     assert_equal(http_status_to_grpc(401), StatusCode.UNAUTHENTICATED)
     assert_equal(http_status_to_grpc(404), StatusCode.UNIMPLEMENTED)
@@ -120,5 +170,6 @@ def main() raises:
     test_timeout_coding()
     test_binary_metadata()
     test_message_framing()
+    test_accept_encoding()
     test_code_mappings()
     print("test_grpc_units: all tests passed")
