@@ -113,7 +113,8 @@ Unix sockets and mTLS are documented in [src/grpc/README.md](src/grpc/README.md)
 - Optional `PollingServer` for many h2c, TLS, or Unix connections on one
   thread, including streaming RPCs and `request_stop()` GOAWAY drain
 - `grpc.health.v1` Check (`Watch` returns UNIMPLEMENTED)
-- gzip (`grpc-encoding` / `grpc-accept-encoding`) via zlib
+- gzip (`grpc-encoding` / `grpc-accept-encoding`) via zlib, only when
+  the peer accepts gzip
 - gRPC server reflection (`grpc.reflection.v1` and `v1alpha`)
 
 ## Current limits

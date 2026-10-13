@@ -43,23 +43,33 @@ struct Rig(Movable):
             self.server_conn.process_next_frame()
 
     def respond(
-        mut self, sid: UInt32, payload: Span[Byte, _], *, end: Bool
+        mut self,
+        sid: UInt32,
+        payload: Span[Byte, _],
+        *,
+        end: Bool,
+        encoding: StringSpan = "",
     ) raises:
-        var hdrs = [
-            HeaderField(name=String(":status"), value=String("200")),
+        var hdrs = List[HeaderField]()
+        hdrs.append(HeaderField(name=String(":status"), value=String("200")))
+        hdrs.append(
             HeaderField(
                 name=String("content-type"), value=String("application/grpc")
-            ),
-        ]
+            )
+        )
+        if encoding.byte_length() > 0:
+            hdrs.append(
+                HeaderField(
+                    name=String("grpc-encoding"), value=String(encoding)
+                )
+            )
         self.server_conn.send_headers(sid, Span(hdrs), end_stream=False)
         self.server_conn.send_data(sid, payload, end_stream=False)
         if end:
             var trailers = [
                 HeaderField(name=String("grpc-status"), value=String("0"))
             ]
-            self.server_conn.send_headers(
-                sid, Span(trailers), end_stream=True
-            )
+            self.server_conn.send_headers(sid, Span(trailers), end_stream=True)
 
 
 def make_rig(*, max_concurrent_streams: Int = 256) raises -> Rig:
@@ -118,7 +128,9 @@ def test_blocked_send_uses_its_own_deadline() raises:
 
 
 def check_next_call_after_failed_recv(
-    bad_payload: List[Byte], expected: StringSpan
+    bad_payload: List[Byte],
+    expected: StringSpan,
+    encoding: StringSpan = "",
 ) raises:
     # The server allows one stream at a time, so a failed call that is left
     # half-open blocks every later call on the channel.
@@ -128,7 +140,7 @@ def check_next_call_after_failed_recv(
     )
     rig.channel.send_msg[EchoRequest](sid, EchoRequest(message="a"), last=True)
     rig.pump_until_headers(sid)
-    rig.respond(sid, Span(bad_payload), end=False)
+    rig.respond(sid, Span(bad_payload), end=False, encoding=encoding)
     var err = String("<no error>")
     try:
         _ = rig.channel.recv_msg[EchoResponse](sid)
@@ -157,13 +169,16 @@ def test_failed_recv_frees_the_stream() raises:
     check_next_call_after_failed_recv(bad_flag, "invalid compressed flag")
 
     var not_gzip = frame_message("abc".as_bytes(), compressed=True)
-    check_next_call_after_failed_recv(not_gzip, "gzip decompress failed")
+    check_next_call_after_failed_recv(
+        not_gzip, "compressed flag requires grpc-encoding: gzip"
+    )
+    check_next_call_after_failed_recv(
+        not_gzip, "gzip decompress failed", encoding="gzip"
+    )
 
     # Field 1 declares 5 bytes but carries 1: the message does not decode.
     var truncated: List[Byte] = [0x0A, 0x05, 0x41]
-    check_next_call_after_failed_recv(
-        frame_message(Span(truncated)), "proto"
-    )
+    check_next_call_after_failed_recv(frame_message(Span(truncated)), "proto")
 
 
 def test_finish_closes_our_side() raises:

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Response messages are gzip-compressed only when the client lists
+  `gzip` in `grpc-accept-encoding`. A missing header means identity
+  only. Comma-separated values are split, and spaces or tabs around
+  each token are ignored, so `identity, gzip` still allows gzip.
+  `compress_response` on a client that did not accept gzip sends the
+  response uncompressed and omits `grpc-encoding`.
+- A Compressed-Flag of 1 is gunzipped only when that call's
+  `grpc-encoding` is `gzip`. Flag 1 with the header omitted or set to
+  `identity` fails the call with INTERNAL
+  (`compressed flag requires grpc-encoding: gzip`) instead of being
+  decoded as gzip. The blocking `Server` reports that failure, a bad
+  gzip body, and an invalid compressed flag as INTERNAL, matching
+  `PollingServer`.
+
 ## 0.2.8 - 2026-10-09
 
 - Custom metadata on a Trailers-Only response is `trailing_metadata`.

@@ -5,6 +5,7 @@
 
 from std.ffi import c_int, external_call
 from std.testing import assert_equal, assert_false, assert_true
+from std.time import sleep
 
 from common import from_hex, to_hex
 from echo_messages import EchoRequest, EchoResponse
@@ -14,6 +15,7 @@ from grpc import (
     GrpcChannel,
     GrpcTransport,
     Metadata,
+    PollingServer,
     Server,
     ServerCall,
     ServerContext,
@@ -279,13 +281,22 @@ struct RawRig(Movable):
                 if self.server_conn.streams[sid].headers_done:
                     return
 
-    def send_response_headers(mut self, sid: UInt32) raises:
-        var hdrs = [
-            HeaderField(name=String(":status"), value=String("200")),
+    def send_response_headers(
+        mut self, sid: UInt32, encoding: StringSpan = ""
+    ) raises:
+        var hdrs = List[HeaderField]()
+        hdrs.append(HeaderField(name=String(":status"), value=String("200")))
+        hdrs.append(
             HeaderField(
                 name=String("content-type"), value=String("application/grpc")
-            ),
-        ]
+            )
+        )
+        if encoding.byte_length() > 0:
+            hdrs.append(
+                HeaderField(
+                    name=String("grpc-encoding"), value=String(encoding)
+                )
+            )
         self.server_conn.send_headers(sid, Span(hdrs), end_stream=False)
 
 
@@ -299,13 +310,15 @@ def make_raw_rig() raises -> RawRig:
     return RawRig(channel=channel^, server_conn=server_conn^)
 
 
-def recv_framing_error(server_payload: List[Byte], end: Bool) raises -> String:
+def recv_framing_error(
+    server_payload: List[Byte], end: Bool, encoding: StringSpan = ""
+) raises -> String:
     """Starts a call, injects raw response DATA, returns the client error."""
     var rig = make_raw_rig()
     var sid = rig.channel.start_call("/x/Y", Metadata())
     rig.channel.send_request_bytes(sid, "r".as_bytes(), last=True)
     rig.pump_until_headers(sid)
-    rig.send_response_headers(sid)
+    rig.send_response_headers(sid, encoding=encoding)
     rig.server_conn.send_data(sid, Span(server_payload), end_stream=end)
     rig.channel.conn.wait_headers(sid)
     var msg: String
@@ -324,21 +337,34 @@ def test_recv_message_errors() raises:
     var bad_flag: List[Byte] = [2, 0, 0, 0, 0]
     assert_true("invalid compressed flag" in recv_framing_error(bad_flag, True))
 
-    # Compressed-Flag set with a payload that is not gzip.
+    # Compressed-Flag 1 is not gunzipped unless grpc-encoding is gzip.
     var compressed = frame_message("abc".as_bytes(), compressed=True)
     assert_true(
-        "gzip decompress failed" in recv_framing_error(compressed, True)
+        "compressed flag requires grpc-encoding: gzip"
+        in recv_framing_error(compressed, True)
     )
-
-    # Valid gzip payload with Compressed-Flag 1 decompresses.
+    assert_true(
+        "gzip decompress failed"
+        in recv_framing_error(compressed, True, encoding="gzip")
+    )
     var plain: List[Byte] = [0x41, 0x42, 0x43]
     var gz = gzip_compress(Span(plain))
     var gzip_framed = frame_message(Span(gz), compressed=True)
+    assert_true(
+        "compressed flag requires grpc-encoding: gzip"
+        in recv_framing_error(gzip_framed, True)
+    )
+    assert_true(
+        "compressed flag requires grpc-encoding: gzip"
+        in recv_framing_error(gzip_framed, True, encoding="identity")
+    )
+
+    # Valid gzip payload with grpc-encoding: gzip decompresses.
     var rig = make_raw_rig()
     var sid = rig.channel.start_call("/x/Y", Metadata())
     rig.channel.send_request_bytes(sid, "r".as_bytes(), last=True)
     rig.pump_until_headers(sid)
-    rig.send_response_headers(sid)
+    rig.send_response_headers(sid, encoding="gzip")
     rig.server_conn.send_data(sid, Span(gzip_framed), end_stream=True)
     rig.channel.conn.wait_headers(sid)
     var got = rig.channel.recv_response_bytes(sid)
@@ -405,7 +431,11 @@ def test_gzip_unary_e2e() raises:
 
 
 def raw_grpc_request_headers(
-    path: StringSpan, content_type: StringSpan, timeout: StringSpan
+    path: StringSpan,
+    content_type: StringSpan,
+    timeout: StringSpan,
+    accept_encoding: StringSpan = "",
+    message_encoding: StringSpan = "",
 ) -> List[HeaderField]:
     var headers = List[HeaderField]()
     headers.append(HeaderField(name=String(":method"), value=String("POST")))
@@ -422,6 +452,19 @@ def raw_grpc_request_headers(
     if timeout.byte_length() > 0:
         headers.append(
             HeaderField(name=String("grpc-timeout"), value=String(timeout))
+        )
+    if message_encoding.byte_length() > 0:
+        headers.append(
+            HeaderField(
+                name=String("grpc-encoding"), value=String(message_encoding)
+            )
+        )
+    if accept_encoding.byte_length() > 0:
+        headers.append(
+            HeaderField(
+                name=String("grpc-accept-encoding"),
+                value=String(accept_encoding),
+            )
         )
     return headers^
 
@@ -522,7 +565,9 @@ def test_channel_max_message_size() raises:
     except e:
         raised = True
         assert_true("exceeds max size" in String(e), String(e))
-    assert_true(raised, "unary_bytes must reject oversized requests before headers")
+    assert_true(
+        raised, "unary_bytes must reject oversized requests before headers"
+    )
 
     var sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
     raised = False
@@ -547,7 +592,9 @@ def test_channel_max_message_size() raises:
     )
     rig.pump_until_reply()
     var recovered = rig.channel.recv_response_bytes(sid)
-    assert_true(Bool(recovered), "a later call after oversized send must complete")
+    assert_true(
+        Bool(recovered), "a later call after oversized send must complete"
+    )
     var result = rig.channel.finish(sid)
     assert_true(result.status.is_ok(), result.status.message)
     rig.channel.close()
@@ -556,9 +603,7 @@ def test_channel_max_message_size() raises:
     rig = make_e2e_rig()
     rig.channel.set_max_message_size(1)
     sid = rig.channel.start_call("/echo.Echo/Say", Metadata())
-    rig.channel.send_request_bytes(
-        sid, Span(encode(EchoRequest())), last=True
-    )
+    rig.channel.send_request_bytes(sid, Span(encode(EchoRequest())), last=True)
     rig.pump_until_reply()
     raised = False
     try:
@@ -854,9 +899,7 @@ def test_server_initial_window_size() raises:
 
 def test_channel_initial_window_size() raises:
     def too_large() raises:
-        _ = GrpcChannel.connect(
-            "127.0.0.1", 1, initial_window_size=0x80000000
-        )
+        _ = GrpcChannel.connect("127.0.0.1", 1, initial_window_size=0x80000000)
 
     assert_true(
         "initial_window_size" in expect_error(too_large, "window"),
@@ -1033,6 +1076,299 @@ def test_public_unary_api() raises:
     _ = external_call["kill", c_int](pid, c_int(9))
 
 
+def compression_flag_handler(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    if ctx.request_compressed:
+        return EchoResponse(message="compressed")
+    return EchoResponse(message=String("plain:") + req.message)
+
+
+def compression_always_handler(
+    req: EchoRequest, mut ctx: ServerContext
+) raises -> EchoResponse:
+    ctx.compress_response = True
+    return EchoResponse(message=req.message.copy())
+
+
+@fieldwise_init
+struct WireCall(Movable):
+    var status: String
+    var message: String
+    var encoding: String
+    var compressed: Bool
+    var payload: List[Byte]
+
+
+def read_wire_call(
+    mut client: Http2Connection[TCPStream], sid: UInt32
+) raises -> WireCall:
+    var status = String()
+    var message = String()
+    var encoding = String()
+    var headers = client.streams[sid].headers.copy()
+    for f in headers:
+        if f.name == "grpc-status":
+            status = f.value.copy()
+        elif f.name == "grpc-message":
+            message = percent_decode_message(f.value)
+        elif f.name == "grpc-encoding":
+            encoding = f.value.copy()
+    if client.streams[sid].trailers_done:
+        var trailers = client.streams[sid].trailers.copy()
+        for f in trailers:
+            if f.name == "grpc-status":
+                status = f.value.copy()
+            elif f.name == "grpc-message":
+                message = percent_decode_message(f.value)
+    var body = client.streams[sid].data.copy()
+    var compressed = False
+    var payload = List[Byte]()
+    if len(body) >= 5:
+        compressed = Int(body[0]) == 1
+        var n = (
+            (Int(body[1]) << 24)
+            | (Int(body[2]) << 16)
+            | (Int(body[3]) << 8)
+            | Int(body[4])
+        )
+        var raw = List[Byte]()
+        raw.extend(Span(body)[5 : 5 + n])
+        if compressed:
+            payload = gzip_decompress(Span(raw), max_size=4 * 1024 * 1024)
+        else:
+            payload = raw^
+    return WireCall(
+        status=status^,
+        message=message^,
+        encoding=encoding^,
+        compressed=compressed,
+        payload=payload^,
+    )
+
+
+def plain_request(text: StringSpan) raises -> List[Byte]:
+    return frame_message(Span(encode(EchoRequest(message=String(text)))))
+
+
+def gzip_request(text: StringSpan) raises -> List[Byte]:
+    var plain = encode(EchoRequest(message=String(text)))
+    var gz = gzip_compress(Span(plain))
+    return frame_message(Span(gz), compressed=True)
+
+
+def assert_identity_response(got: WireCall, text: StringSpan) raises:
+    assert_equal(got.status, "0", got.message)
+    assert_false(got.compressed, "response Compressed-Flag must be 0")
+    assert_equal(got.encoding, "", "identity response must omit grpc-encoding")
+    var resp = decode[EchoResponse](Span(got.payload))
+    assert_equal(resp.message, String(text))
+
+
+def assert_gzip_response(got: WireCall, text: StringSpan) raises:
+    assert_equal(got.status, "0", got.message)
+    assert_true(got.compressed, "response Compressed-Flag must be 1")
+    assert_equal(got.encoding, "gzip")
+    var resp = decode[EchoResponse](Span(got.payload))
+    assert_equal(resp.message, String(text))
+
+
+def assert_flag_rejected(got: WireCall) raises:
+    assert_equal(got.status, String(StatusCode.INTERNAL), got.message)
+    assert_true(
+        "compressed flag requires grpc-encoding: gzip" in got.message,
+        got.message,
+    )
+
+
+def blocking_call(
+    mut client: Http2Connection[TCPStream],
+    mut server_conn: Http2Connection[GrpcTransport],
+    mut server: Server,
+    mut handled: List[UInt32],
+    headers: Span[HeaderField, _],
+    body: Span[Byte, _],
+) raises -> WireCall:
+    var sid = client.open_stream()
+    client.send_headers(sid, headers, end_stream=False)
+    client.send_data(sid, body, end_stream=True)
+    while True:
+        server_conn.process_next_frame()
+        if server.dispatch_ready(server_conn, handled) > 0:
+            break
+    client.wait_stream_end(sid)
+    return read_wire_call(client, sid)
+
+
+def polling_call(
+    mut client: Http2Connection[TCPStream],
+    headers: Span[HeaderField, _],
+    body: Span[Byte, _],
+) raises -> WireCall:
+    var sid = client.open_stream()
+    client.send_headers(sid, headers, end_stream=False)
+    client.send_data(sid, body, end_stream=True)
+    client.wait_stream_end(sid)
+    return read_wire_call(client, sid)
+
+
+trait CompressionTransport:
+    def exchange(
+        mut self, headers: List[HeaderField], body: Span[Byte, _]
+    ) raises -> WireCall:
+        ...
+
+
+@fieldwise_init
+struct BlockingTransport(CompressionTransport, Movable):
+    var client: Http2Connection[TCPStream]
+    var server_conn: Http2Connection[GrpcTransport]
+    var server: Server
+    var handled: List[UInt32]
+
+    def exchange(
+        mut self, headers: List[HeaderField], body: Span[Byte, _]
+    ) raises -> WireCall:
+        return blocking_call(
+            self.client,
+            self.server_conn,
+            self.server,
+            self.handled,
+            Span(headers),
+            body,
+        )
+
+
+@fieldwise_init
+struct PollingTransport(CompressionTransport, Movable):
+    var client: Http2Connection[TCPStream]
+
+    def exchange(
+        mut self, headers: List[HeaderField], body: Span[Byte, _]
+    ) raises -> WireCall:
+        return polling_call(self.client, Span(headers), body)
+
+
+def exercise_compression_contract[
+    T: CompressionTransport
+](mut transport: T,) raises:
+    var gzip_body = gzip_request("hi")
+    var plain = plain_request("hi")
+
+    var missing = raw_grpc_request_headers(
+        "/echo.Echo/Flag", "application/grpc", ""
+    )
+    assert_flag_rejected(transport.exchange(missing^, Span(gzip_body)))
+
+    var identity = raw_grpc_request_headers(
+        "/echo.Echo/Flag", "application/grpc", "", message_encoding="identity"
+    )
+    assert_flag_rejected(transport.exchange(identity^, Span(gzip_body)))
+
+    var declared = raw_grpc_request_headers(
+        "/echo.Echo/Flag",
+        "application/grpc",
+        "",
+        message_encoding="gzip",
+    )
+    var accepted = transport.exchange(declared^, Span(gzip_body))
+    assert_identity_response(accepted, "compressed")
+
+    var deflate = raw_grpc_request_headers(
+        "/echo.Echo/Flag",
+        "application/grpc",
+        "",
+        message_encoding="deflate",
+    )
+    var unsupported = transport.exchange(deflate^, Span(plain))
+    assert_equal(
+        unsupported.status,
+        String(StatusCode.UNIMPLEMENTED),
+        unsupported.message,
+    )
+
+    var no_accept = raw_grpc_request_headers(
+        "/echo.Echo/Gzip", "application/grpc", ""
+    )
+    assert_identity_response(transport.exchange(no_accept^, Span(plain)), "hi")
+
+    var identity_only = raw_grpc_request_headers(
+        "/echo.Echo/Gzip", "application/grpc", "", accept_encoding="identity"
+    )
+    assert_identity_response(
+        transport.exchange(identity_only^, Span(plain)), "hi"
+    )
+
+    var listed = raw_grpc_request_headers(
+        "/echo.Echo/Gzip",
+        "application/grpc",
+        "",
+        accept_encoding="identity, gzip",
+    )
+    assert_gzip_response(transport.exchange(listed^, Span(plain)), "hi")
+
+
+def test_compression_negotiation() raises:
+    var server = Server("127.0.0.1", 0)
+    server.register_unary[compression_flag_handler]("/echo.Echo/Flag")
+    server.register_unary[compression_always_handler]("/echo.Echo/Gzip")
+    var listener = TCPListener("127.0.0.1", 0)
+    var client_tcp = TCPStream.connect("127.0.0.1", listener.local_port)
+    var client = Http2Connection(client_tcp^, is_client=True)
+    var server_tcp = listener.accept()
+    var transport = GrpcTransport.plaintext(server_tcp^)
+    var server_conn = Http2Connection(transport^, is_client=False)
+    listener.close()
+    var session = BlockingTransport(
+        client=client^,
+        server_conn=server_conn^,
+        server=server^,
+        handled=List[UInt32](),
+    )
+    exercise_compression_contract(session)
+    session.client.close()
+    session.server_conn.close()
+
+
+def connect_raw_client(port: UInt16) raises -> Http2Connection[TCPStream]:
+    for _ in range(200):
+        try:
+            var tcp = TCPStream.connect("127.0.0.1", port)
+            tcp.set_read_timeout(5_000_000_000)
+            return Http2Connection(tcp^, is_client=True)
+        except:
+            sleep(0.01)
+    raise Error("polling server did not accept")
+
+
+def test_polling_compression_negotiation() raises:
+    var probe = TCPListener("127.0.0.1", 0)
+    var port = probe.local_port
+    probe.close()
+    var pid = external_call["fork", c_int]()
+    if pid == 0:
+        try:
+            var server = PollingServer("127.0.0.1", port)
+            server.register_unary[compression_flag_handler]("/echo.Echo/Flag")
+            server.register_unary[compression_always_handler]("/echo.Echo/Gzip")
+            server.serve()
+        except:
+            external_call["_exit", NoneType](c_int(1))
+
+    try:
+        var session = PollingTransport(client=connect_raw_client(port))
+        exercise_compression_contract(session)
+        session.client.close()
+    except e:
+        _ = external_call["kill", c_int](pid, c_int(9))
+        var status = c_int(0)
+        _ = external_call["waitpid", c_int](pid, Pointer(to=status), c_int(0))
+        raise e
+    _ = external_call["kill", c_int](pid, c_int(9))
+    var status = c_int(0)
+    _ = external_call["waitpid", c_int](pid, Pointer(to=status), c_int(0))
+
+
 def main() raises:
     test_timeout_encode_units()
     test_timeout_decode_edges()
@@ -1046,6 +1382,8 @@ def main() raises:
     test_gzip_roundtrip()
     test_recv_message_errors()
     test_gzip_unary_e2e()
+    test_compression_negotiation()
+    test_polling_compression_negotiation()
     test_server_max_message_size()
     test_channel_max_message_size()
     test_server_initial_window_size()

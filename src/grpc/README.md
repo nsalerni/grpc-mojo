@@ -52,10 +52,12 @@ and fall back to Check.
 This is what `grpcurl` / `grpcui` need. Extension lookup is
 UNIMPLEMENTED.
 
-Gzip is negotiated with `grpc-accept-encoding: gzip`. Clients send
-compressed requests with `start_call(..., encoding="gzip")` and
-`send_request_bytes(..., compress=True)`. Handlers set
-`ctx.compress_response = True` to gzip responses.
+Gzip is negotiated with `grpc-accept-encoding`. Clients send compressed
+requests with `start_call(..., encoding="gzip")` and
+`send_request_bytes(..., compress=True)`. A Compressed-Flag of 1 is
+accepted only when `grpc-encoding` is `gzip`. Handlers set
+`ctx.compress_response = True` to gzip responses; the server does so
+only when the request lists gzip, and otherwise sends identity.
 
 `PollingServer.request_stop()` sends GOAWAY and returns after live streams
 drain. `install_stop_signals()` writes the wakeup pipe from SIGTERM/SIGINT.
